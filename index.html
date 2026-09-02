@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lyra</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="player-wrap">
+
+  <!-- Title bar (draggable) -->
+  <div class="titlebar">
+    <span class="app-name">LYRA<span class="perf-badge">PERF</span></span>
+    <div class="eq-pill" id="eq-pill">EQ: OFF</div>
+    <div class="window-controls">
+      <button class="wc-btn settings-btn" id="btn-settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <button class="wc-btn" id="btn-min"   title="Minimize">&#8212;</button>
+      <button class="wc-btn" id="btn-max"   title="Maximize">&#9723;</button>
+      <button class="wc-btn close" id="btn-close" title="Close">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- Settings panel -->
+  <div class="settings-panel" id="settings-panel">
+    <div class="settings-section">
+      <div class="settings-dual-row">
+        <div class="settings-toggle-wrap">
+          <div class="settings-label-group">
+            <div class="settings-label">CLOSE MINIMIZES</div>
+            <div class="settings-sublabel">Keep Lyra in tray</div>
+          </div>
+          <button class="settings-toggle" id="toggle-close-minimize" role="switch" aria-checked="false">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+        <div class="settings-toggle-wrap">
+          <div class="settings-label-group">
+            <div class="settings-label">PERFORMANCE MODE</div>
+            <div class="settings-sublabel">Disable all animations</div>
+          </div>
+          <button class="settings-toggle" id="toggle-perf-mode" role="switch" aria-checked="false">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+        <div class="settings-toggle-wrap">
+          <div class="settings-label-group">
+            <div class="settings-label">SPOTIFY-INSPIRED LAYOUT</div>
+            <div class="settings-sublabel">Dark library-first desktop view</div>
+          </div>
+          <button class="settings-toggle" id="toggle-spotify-layout" role="switch" aria-checked="false">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">THEME</div>
+      <div class="theme-options" id="theme-options">
+        <button class="theme-opt active" data-theme="gold">
+          <span class="theme-dot" style="background:#c9a94a;box-shadow:0 0 5px #c9a94a66"></span>
+          <span>Gold</span>
+        </button>
+        <button class="theme-opt" data-theme="red">
+          <span class="theme-dot" style="background:#c94a4a;box-shadow:0 0 5px #c94a4a66"></span>
+          <span>Red</span>
+        </button>
+        <button class="theme-opt" data-theme="ocean">
+          <span class="theme-dot" style="background:#4a9ac9;box-shadow:0 0 5px #4a9ac966"></span>
+          <span>Ocean</span>
+        </button>
+        <button class="theme-opt" data-theme="forest">
+          <span class="theme-dot" style="background:#4ac96a;box-shadow:0 0 5px #4ac96a66"></span>
+          <span>Forest</span>
+        </button>
+        <button class="theme-opt" data-theme="amethyst">
+          <span class="theme-dot" style="background:#9a4ac9;box-shadow:0 0 5px #9a4ac966"></span>
+          <span>Amethyst</span>
+        </button>
+        <button class="theme-opt" data-theme="mono">
+          <span class="theme-dot" style="background:#b0b0b0;box-shadow:0 0 5px #b0b0b066"></span>
+          <span>Mono</span>
+        </button>
+        <button class="theme-opt" data-theme="dynamic">
+          <span class="theme-dot"></span>
+          <span>Dynamic</span>
+        </button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">CONFIG FILE</div>
+      <div class="keybind-cfg-note">
+        Lyra reads <code>Lyra.cfg</code> for custom keybindings and theme.
+        <span class="keybind-cfg-path" id="keybind-cfg-path"></span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">ANIMATION STYLE</div>
+      <div class="settings-anim-options">
+        <button class="anim-opt active" data-anim="default">
+          <span class="anim-opt-icon">◎</span>
+          <span class="anim-opt-name">Default</span>
+          <span class="anim-opt-desc">Spectrum visualizer</span>
+        </button>
+        <button class="anim-opt" data-anim="cover">
+          <span class="anim-opt-icon">⬛</span>
+          <span class="anim-opt-name">Cover Art</span>
+          <span class="anim-opt-desc">Square art, bumps to beat</span>
+        </button>
+        <button class="anim-opt" data-anim="vinyl">
+          <span class="anim-opt-icon">◉</span>
+          <span class="anim-opt-name">Vinyl</span>
+          <span class="anim-opt-desc">Spinning record</span>
+        </button>
+        <button class="anim-opt" data-anim="off">
+          <span class="anim-opt-icon">□</span>
+          <span class="anim-opt-name">Off</span>
+          <span class="anim-opt-desc">Static cover art, no animation</span>
+        </button>
+        </div>
+    </div>
+  </div>
+
+  <!-- Cover carousel: top strip in maximized/wide mode -->
+  <div class="cover-carousel" id="cover-carousel"></div>
+
+  <!-- Player body -->
+  <div class="player-body">
+
+    <!-- Optional navigation rail. Its controls reuse Lyra's existing library actions. -->
+    <aside class="spotify-sidebar" aria-label="Library navigation">
+      <div class="spotify-brand"><span class="spotify-brand-mark">●</span> LYRA</div>
+      <button class="spotify-nav-btn active" id="spotify-nav-home" type="button">Home</button>
+      <button class="spotify-nav-btn" id="spotify-nav-search" type="button">Search</button>
+      <button class="spotify-nav-btn" id="spotify-nav-library" type="button">Your Library</button>
+      <div class="spotify-sidebar-rule"></div>
+      <div class="spotify-sidebar-rule spotify-playlists-rule"></div>
+      <div class="spotify-library-toolbar">
+        <label class="spotify-library-label" for="spotify-library-mode">BROWSE</label>
+        <select class="spotify-library-mode" id="spotify-library-mode" aria-label="Choose library view">
+          <option value="playlists">Playlists</option>
+          <option value="root">Root</option>
+        </select>
+      </div>
+      <div class="spotify-playlist-list" id="spotify-playlist-list"></div>
+      <div class="spotify-sidebar-footer">YOUR MUSIC<br><span>Queue and playlists</span></div>
+    </aside>
+
+    <!-- LEFT: artwork + controls -->
+    <div class="player-left">
+      <div class="player-controls-col">
+
+      <!-- "Off" style: 7-cover depth strip (JS-rendered) -->
+      <div class="cover-strip" id="cover-strip"></div>
+      <img class="spotify-bottom-cover" id="spotify-bottom-cover" alt="Current track artwork" />
+
+      <!-- Album art + spectrum -->
+      <div class="artwork-container" id="artwork-container">
+        <div class="artwork-wrapper">
+          <canvas id="spectrum-canvas" width="320" height="320"></canvas>
+          <div id="artwork-bump-wrap">
+          <div class="artwork" id="artwork">
+            <div class="artwork-placeholder" id="artwork-placeholder">
+              <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="40" cy="40" r="30" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+                <circle cx="40" cy="40" r="18" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+                <circle cx="40" cy="40" r="4"  fill="currentColor"   opacity="0.4"/>
+                <line x1="40" y1="10" x2="40" y2="22" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+              </svg>
+            </div>
+            <img id="cover-img" src="" alt="" style="display:none;" />
+            <div class="vinyl-ring" id="vinyl-ring"></div>
+          </div><!-- /artwork -->
+          </div><!-- /artwork-bump-wrap -->
+        </div>
+      </div>
+
+      <!-- Track info -->
+      <div class="track-info">
+        <div class="track-title" id="track-title">No track loaded</div>
+        <div class="track-meta"  id="track-meta">— · —</div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="progress-area">
+        <span class="time-label" id="time-current">0:00</span>
+        <div class="progress-bar" id="progress-bar">
+          <div class="progress-fill"  id="progress-fill"></div>
+          <div class="progress-thumb" id="progress-thumb"></div>
+        </div>
+        <span class="time-label" id="time-total">0:00</span>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls">
+        <button class="ctrl-btn" id="btn-shuffle" title="Shuffle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+          </svg>
+        </button>
+        <button class="ctrl-btn" id="btn-prev" title="Previous">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+          </svg>
+        </button>
+        <button class="ctrl-btn play-btn" id="btn-play" title="Play/Pause">
+          <svg id="icon-play"  viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-next" title="Next">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 6h2v12h-2zM6 6v12l8.5-6z"/>
+          </svg>
+        </button>
+        <button class="ctrl-btn" id="btn-repeat" title="Repeat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M17 2l4 4-4 4M3 11V9a4 4 0 014-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 01-4 4H3"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Volume -->
+      <div class="volume-area">
+        <button class="vol-icon" id="btn-mute" title="Mute">
+          <svg id="icon-vol" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+            <path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" opacity=".5"/>
+          </svg>
+          <svg id="icon-mute" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+          </svg>
+        </button>
+        <div class="volume-bar" id="volume-bar">
+          <div class="volume-fill"  id="volume-fill"  style="width:80%"></div>
+          <div class="volume-thumb" id="volume-thumb" style="left:80%"></div>
+        </div>
+        <span class="volume-val" id="volume-val">80</span>
+      </div>
+
+      <!-- EQ button centered below volume bar -->
+      <div class="eq-btn-row">
+        <button class="eq-toggle-btn" id="btn-eq-toggle" title="Equalizer">EQ</button>
+      </div>
+
+      <!-- Equalizer popup -->
+      <div class="eq-panel" id="eq-panel">
+        <div class="eq-header">
+          <div class="eq-header-left">
+            <span class="eq-title">EQUALIZER</span>
+            <button class="eq-onoff" id="eq-onoff" title="Enable/Disable EQ">OFF</button>
+          </div>
+          <div class="eq-presets" id="eq-presets">
+            <button class="eq-preset active" data-preset="flat">Flat</button>
+            <button class="eq-preset" data-preset="bass">Bass</button>
+            <button class="eq-preset" data-preset="vocal">Vocal</button>
+            <button class="eq-preset" data-preset="treble">Treble</button>
+          </div>
+          <button class="eq-close-btn" id="btn-eq-close" title="Close EQ">✕</button>
+        </div>
+        <div class="eq-bands" id="eq-bands">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      </div><!-- /player-controls-col -->
+
+      <!-- Queue preview strip: shown below controls in narrow; vertical sidebar in wide/maximized -->
+      <div class="queue-preview" id="queue-preview">
+        <!-- populated by JS -->
+      </div>
+
+    </div><!-- /player-left -->
+
+    <!-- RIGHT: playlist -->
+    <div class="player-right">
+      <div class="playlist-header">
+        <div class="playlist-label-area" id="playlist-label-area" title="Click to search">
+          <span class="playlist-label" id="playlist-label">QUEUE</span>
+          <div class="header-search-wrap" id="header-search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11" class="header-search-icon">
+              <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <input type="text" id="search-input" placeholder="Search…" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="playlist-actions">
+          <button class="action-btn" id="btn-add-files"  title="Add files">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </button>
+          <button class="action-btn" id="btn-add-folder" title="Add folder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          </button>
+          <button class="action-btn" id="btn-toggle-folders" title="Toggle folder/flat view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          <button class="action-btn" id="btn-export-playlist" title="Export playlist as .lyra file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button class="action-btn danger" id="btn-clear" title="Clear queue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="playlist" id="playlist">
+        <div class="playlist-empty" id="playlist-empty">
+          Drop audio files here or use the buttons above
+        </div>
+      </div>
+    </div><!-- /player-right -->
+
+    <!-- Dedicated now-playing panel for the optional Spotify-inspired layout. -->
+    <aside class="spotify-now-playing" aria-label="Now playing">
+      <div class="spotify-now-heading">NOW PLAYING</div>
+      <img class="spotify-now-cover" id="spotify-now-cover" alt="Current album artwork" />
+      <div class="spotify-now-title" id="spotify-now-title">No track loaded</div>
+      <div class="spotify-now-artist" id="spotify-now-artist">Choose a song to start listening</div>
+      <div class="spotify-now-card">
+        <div class="spotify-now-card-label">UP NEXT</div>
+        <div class="spotify-now-next" id="spotify-now-next">Your queue is empty</div>
+      </div>
+    </aside>
+
+  </div><!-- /player-body -->
+
+  <div class="eq-backdrop" id="eq-backdrop"></div>
+  
+  <div id="context-menu" class="context-menu">
+    <div class="cm-item" id="cm-copy">Copy details</div>
+    <div class="cm-item" id="cm-open">Open in folder</div>
+    <div class="cm-divider"></div>
+    <div class="cm-item cm-danger" id="cm-remove">Remove from playlist</div>
+  </div>
+
+  <!-- Background spectrum waves (Dynamic mode) -->
+  <canvas id="bg-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:-1;pointer-events:none;transition:opacity 1s ease;"></canvas>
+
+  <div id="fullscreen-view" class="fullscreen-view" style="display:none;">
+    <div class="fs-bg" id="fs-bg"></div>
+    <div class="fs-content">
+      <img id="fs-cover" src="" alt="" />
+      <div class="fs-overlay-ui" id="fs-overlay-ui">
+        <div class="fs-info">
+          <div id="fs-title" class="fs-title">No track loaded</div>
+          <div id="fs-artist" class="fs-artist">— · —</div>
+        </div>
+        
+        <div class="fs-progress-area" style="margin-bottom: 32px;">
+          <span class="fs-time-label" id="fs-time-current">0:00</span>
+          <div class="fs-progress-bar" id="fs-progress-bar">
+            <div class="fs-progress-fill" id="fs-progress-fill"></div>
+          </div>
+          <span class="fs-time-label" id="fs-time-total">0:00</span>
+        </div>
+
+        <div class="fs-controls" id="fs-controls" style="margin-bottom: 0;">
+          <button class="fs-btn" id="fs-btn-prev" title="Previous">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+          </button>
+          <button class="fs-btn fs-play-btn" id="fs-btn-play" title="Play/Pause">
+            <svg id="fs-icon-play" viewBox="0 0 24 24" fill="currentColor" width="48" height="48"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="fs-icon-pause" viewBox="0 0 24 24" fill="currentColor" width="48" height="48" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button class="fs-btn" id="fs-btn-next" title="Next">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32"><path d="M16 6h2v12h-2zM6 6v12l8.5-6z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="audio-el"></audio>
+</div>
+<!-- Mini Player Independent View -->
+<div id="mini-player-view" class="mini-view">
+  <img id="mini-cover" src="" />
+  <div class="mini-info">
+    <div id="mini-title">Title</div>
+    <div id="mini-artist">Artist</div>
+    <div class="mini-controls">
+      <button id="mini-btn-prev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+      <button id="mini-btn-play">
+        <svg id="mini-icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="mini-icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+      <button id="mini-btn-next"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 6v12l8.5-6z"/></svg></button>
+    </div>
+  </div>
+  <button id="mini-btn-close">&#10005;</button>
+  <div class="mini-progress-bar" id="mini-progress-bar"><div class="mini-progress-fill" id="mini-progress-fill"></div></div>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>
