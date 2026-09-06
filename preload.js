@@ -8,6 +8,8 @@ function replaceListener(channel, wrapper) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getInterfaceMode: ()         => ipcRenderer.invoke('interface-mode:get'),
+  setInterfaceMode: (mode)     => ipcRenderer.invoke('interface-mode:set', mode),
   buildTracks:      (paths)    => ipcRenderer.invoke('build-tracks', paths),
   openFiles:        ()         => ipcRenderer.invoke('open-files'),
   openFolder:       ()         => ipcRenderer.invoke('open-folder'),

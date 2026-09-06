@@ -201,6 +201,48 @@ body.wide .player-wrap {
 .settings-section + .settings-section {
   border-top: 1px solid var(--border);
 }
+
+.interface-mode-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.interface-mode-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, color 0.18s;
+}
+
+.interface-mode-opt:hover,
+.interface-mode-opt.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+}
+
+.interface-mode-name {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.interface-mode-desc {
+  font-size: 9px;
+  opacity: 0.6;
+}
 .settings-dual-row {
   display: flex;
   align-items: center;

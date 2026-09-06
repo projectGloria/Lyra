@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, Tray, nativeImage, globalShortcut, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, Tray, nativeImage, globalShortcut, protocol, screen } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const { fitBoundsToDisplays } = require('./window-bounds');
 
 // music-metadata is imported lazily on first use to avoid race conditions at startup
 let mm;
@@ -437,12 +438,15 @@ function destroyTray() {
 // ── Window ────────────────────────────────────────────────────────────────────
 function createWindow() {
   const savedBounds = loadBounds();
+  const windowBounds = fitBoundsToDisplays(savedBounds, {
+    width: 420,
+    height: 680,
+    minWidth: 380,
+    minHeight: 520
+  }, screen);
 
   mainWindow = new BrowserWindow({
-    width:     savedBounds?.width  ?? 420,
-    height:    savedBounds?.height ?? 680,
-    x:         savedBounds?.x,
-    y:         savedBounds?.y,
+    ...windowBounds,
     minWidth:  380,
     minHeight: 520,
     resizable: true,
@@ -455,7 +459,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
   });
 
   mainWindow.loadFile('index.html');
@@ -508,7 +512,28 @@ function createWindow() {
     }
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  const recoverWindowPosition = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const current = mainWindow.getBounds();
+    const recovered = fitBoundsToDisplays(current, {
+      width: 420,
+      height: 680,
+      minWidth: 380,
+      minHeight: 520
+    }, screen);
+    if (current.x !== recovered.x || current.y !== recovered.y || current.width !== recovered.width || current.height !== recovered.height) {
+      mainWindow.setBounds(recovered);
+      mainWindow.show();
+    }
+  };
+  screen.on('display-removed', recoverWindowPosition);
+  screen.on('display-metrics-changed', recoverWindowPosition);
+
+  mainWindow.on('closed', () => {
+    screen.removeListener('display-removed', recoverWindowPosition);
+    screen.removeListener('display-metrics-changed', recoverWindowPosition);
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {
