@@ -172,22 +172,6 @@ const animOpts        = document.querySelectorAll('.anim-opt');
 const toggleCloseMin  = document.getElementById('toggle-close-minimize');
 const togglePerfMode  = document.getElementById('toggle-perf-mode');
 const toggleSpotifyLayout = document.getElementById('toggle-spotify-layout');
-const interfaceModeOpts = document.querySelectorAll('[data-interface-mode]');
-
-async function initInterfaceMode() {
-  if (!window.electronAPI?.getInterfaceMode) return;
-  const currentMode = await window.electronAPI.getInterfaceMode();
-  interfaceModeOpts.forEach((button) => button.classList.toggle('active', button.dataset.interfaceMode === currentMode));
-}
-
-interfaceModeOpts.forEach((button) => button.addEventListener('click', async () => {
-  if (button.dataset.interfaceMode === 'lyra' || !window.electronAPI?.setInterfaceMode) return;
-  interfaceModeOpts.forEach((option) => { option.disabled = true; });
-  await window.electronAPI.setInterfaceMode(button.dataset.interfaceMode);
-}));
-
-initInterfaceMode();
-
 // EQ elements
 const eqPanel         = document.getElementById('eq-panel');
 const eqBandsEl       = document.getElementById('eq-bands');

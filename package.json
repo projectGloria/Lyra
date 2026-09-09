@@ -1,9 +1,9 @@
 {
   "name": "lyra-music-player",
   "version": "3.0.0",
-  "description": "Lyra v3 with Classic and Sona interface modes",
+  "description": "Lyra - classic compact music player",
   "author": "Machine",
-  "main": "launcher.js",
+  "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
