@@ -1,0 +1,32 @@
+{
+  "version": "1.0.3",
+  "versionCode": 4,
+  "tests": {
+    "tests": 55,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 26
+  },
+  "debugApkBuilt": true,
+  "instrumentationApkBuilt": true,
+  "signatureVerified": true,
+  "updateSignerMatches": true,
+  "alignment16KiBVerified": true,
+  "desktopOriginalFilesUnchanged": 47,
+  "connectedDevices": 0,
+  "phoneValidation": "Not run: audible seek latency, phone artwork/storage providers, and immersive system bars require a device.",
+  "apk": {
+    "file": "Lyra-Android-1.0.3-debug.apk",
+    "bytes": 25469783,
+    "sha256": "49599EB1CB060EF3327D4B5F308439A03B0829D1B1A4F5291D076A1165A5BA4A"
+  },
+  "source": {
+    "file": "Lyra-Android-1.0.3-source.zip",
+    "bytes": 1762783,
+    "sha256": "62D09F8B7791A710A3BB456F47ADDFDFF44951DD6719549F076372B3DCE9B1F6"
+  }
+}

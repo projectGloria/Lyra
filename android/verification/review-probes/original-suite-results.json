@@ -1,0 +1,44 @@
+[
+  {
+    "name": "com.lyra.sona.android.AndroidPersistenceTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.LibraryTest",
+    "tests": "9",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.Media3QueueTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.OnboardingUiTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.PlaybackPolicyTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.RepositoryTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0"
+  },
+  {
+    "name": "com.lyra.sona.android.SyntheticBenchmarkTest",
+    "tests": "1",
+    "failures": "0",
+    "errors": "0"
+  }
+]

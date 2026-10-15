@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Lyra — No artwork</title>
+  <defs>
+    <radialGradient id="background" cx="0" cy="0" r="1" gradientTransform="translate(256 195) rotate(90) scale(360)">
+      <stop stop-color="#24231f"/>
+      <stop offset="1" stop-color="#0b0d10"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="176" y1="136" x2="337" y2="308" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#efdb9b"/>
+      <stop offset="1" stop-color="#a38343"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#background)" d="M0 0h512v512H0z"/>
+  <circle cx="256" cy="218" r="151" stroke="#c9a94a" stroke-opacity=".09"/>
+  <circle cx="256" cy="218" r="126" stroke="#c9a94a" stroke-opacity=".13"/>
+  <path d="M256 58v12m0 296v12M96 218h12m296 0h12" stroke="#c9a94a" stroke-opacity=".3" stroke-width="2"/>
+  <!-- A lyre: the same quiet gold as Lyra's default accent. -->
+  <g stroke="url(#gold)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M179 145c-17 20-12 40-3 67l17 48c11 32 31 48 63 48s52-16 63-48l17-48c9-27 14-47-3-67" stroke-width="9"/>
+    <path d="M183 164h146M217 170v102m26-102v121m26-121v121m26-121v102M224 309l-9 15h82l-9-15" stroke-width="5"/>
+  </g>
+  <text x="256" y="402" fill="#d7c28c" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="600" letter-spacing="9" text-anchor="middle">LYRA</text>
+  <text x="256" y="442" fill="#a29c8e" font-family="Segoe UI, Arial, sans-serif" font-size="21" letter-spacing="3" text-anchor="middle">NO ARTWORK</text>
+</svg>

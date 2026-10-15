@@ -1,0 +1,174 @@
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:processDebugNavigationResources
+> Task :app:compileDebugNavigationResources
+> Task :app:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+
+> Task :app:processDebugMainManifest
+C:\Users\Nihil\Desktop\Github Repos\Lyra\android\app\src\main\AndroidManifest.xml:3:5-87 Warning:
+	uses-permission#android.permission.INTERNET was tagged at AndroidManifest.xml:3 to remove other declarations but no other declaration present
+
+> Task :app:processDebugManifest
+> Task :app:mergeDebugResources
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:javaPreCompileDebug
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:processDebugUnitTestManifest
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:generateDebugAndroidTestResValues
+> Task :app:extractProguardFiles
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeDebugJniLibFolders
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:mergeDebugNativeLibs
+> Task :app:processDebugAndroidTestManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeLibDexDebug
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so. Run with --info option to learn more.
+
+> Task :app:generateDebugAndroidTestBuildConfig
+> Task :app:checkDebugAndroidTestAarMetadata
+> Task :app:processDebugAndroidTestNavigationResources
+> Task :app:compileDebugAndroidTestNavigationResources
+> Task :app:mapDebugAndroidTestSourceSetPaths
+> Task :app:generateDebugAndroidTestResources
+> Task :app:mergeDebugAndroidTestShaders
+> Task :app:compileDebugAndroidTestShaders NO-SOURCE
+> Task :app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :app:mergeDebugAndroidTestAssets
+> Task :app:javaPreCompileDebugAndroidTest
+> Task :app:compressDebugAndroidTestAssets
+> Task :app:desugarDebugAndroidTestFileDependencies
+> Task :app:mergeDebugAndroidTestJniLibFolders
+> Task :app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebugAndroidTest
+> Task :app:checkDebugAndroidTestDuplicateClasses
+> Task :app:writeDebugAndroidTestSigningConfigVersions
+> Task :app:mergeLibDexDebugAndroidTest
+> Task :app:mergeDebugAndroidTestResources
+> Task :app:processDebugAndroidTestResources
+> Task :app:processDebugResources
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:mergeExtDexDebugAndroidTest
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:mergeExtDexDebug
+> Task :app:kaptDebugKotlin
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:generateDebugLintReportModel
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:generateDebugUnitTestLintModel
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:mergeProjectDexDebug
+> Task :app:lintAnalyzeDebugAndroidTest FAILED
+> Task :app:lintAnalyzeDebugUnitTest FAILED
+> Task :app:kaptGenerateStubsDebugAndroidTestKotlin
+> Task :app:kaptDebugUnitTestKotlin
+> Task :app:mergeDebugJavaResource
+> Task :app:lintAnalyzeDebug
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:lintAnalyzeDebugAndroidTest'.
+> A failure occurred while executing com.android.build.gradle.internal.lint.AndroidLintWorkAction
+   > Unexpected failure during lint analysis (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Unexpected failure during lint analysis (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Unexpected failure during lint analysis of DeviceScanBenchmarkTest.kt (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Error while resolving org.jetbrains.kotlin.fir.declarations.impl.FirRegularClassImpl 
+     from RAW_FIR to COMPILER_REQUIRED_ANNOTATIONS
+     current declaration phase RAW_FIR
+     origin: Source
+     session: class org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSourcesSession
+     module data: class org.jetbrains.kotlin.analysis.low.level.api.fir.projectStructure.LLFirModuleData
+     KaModule: class org.jetbrains.kotlin.analysis.project.structure.impl.KaSourceModuleImpl
+     platform: JVM (1.8)
+     
+     Stack: \\\`KotlinIllegalArgumentExceptionWithAttachments:LLFirModuleLazyDeclarationResolverKt.handleExceptionFromResolve(LLFirModuleLazyDeclarationResolver.kt:225)←LLFirModuleLazyDeclarationResolverKt.access$handleExceptionFromResolve(LLFirModuleLazyDeclarationResolver.kt:1)←LLFirModuleLazyDeclarationResolver.lazyResolve(LLFirModuleLazyDeclarationResolver.kt:224)←LLFirLazyDeclarationResolver.lazyResolveToPhase(LLFirLazyDeclarationResolver.kt:27)←FirLazyDeclarationResolverKt$lazyResolveToPhase$1.invoke(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt$lazyResolveToPhase$1.invoke(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt.invokeLazyResolveToPhase(FirLazyDeclarationResolver.kt:213)←FirLazyDeclarationResolverKt.lazyResolveToPhase(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt.lazyResolveToPhase(FirLazyDeclarationResolver.kt:125)←FirBasedSymbolKt.resolvedCompilerRequiredAnnotations(FirBasedSymbol.kt:74)←FirAnnotationUtilsKt.hasAnnotation(firAnnotationUtils.kt:192)←FirAnnotationUtilsKt.hasAnnotation$default(firAnnotationUtils.kt:181)←KaFirAnnotationListForDeclaration.contains(KaFirAnnotationListForDeclaration.kt:50)←SymbolAnnotationsProvider.contains(SymbolAnnotationsProvider.kt:37)←GranularAnnotationsBox.hasAnnotation(GranularAnnotationsBox.kt:80)←SymbolLightModifierList.hasAnnotation(SymbolLightModifierList.kt:52)←SymbolLightClassForClassOrObject.isRecord(SymbolLightClassForClassOrObject.kt:271)←PsiClassImplUtil.getExtendsListTypes(PsiClassImplUtil.java:960)←SymbolLightClassBase.getExtendsListTypes(SymbolLightClassBase.kt:155)←PsiClassImplUtil.getSuperTypes(PsiClassImplUtil.java:821)←SymbolLightClassForClassLike.getSuperTypes(SymbolLightClassForClassLike.kt:172)←InheritanceUtil.getSuperClasses(InheritanceUtil.java:92)←InheritanceUtil.getSuperClasses(InheritanceUtil.java:97)←UElementVisitor$SuperclassUastVisitor.getRelevantDetectors(UElementVisitor.kt:373)←UElementVisitor$SuperclassUastVisitor.visitClass(UElementVisitor.kt:364)←AbstractKotlinUClass.accept(AbstractKotlinUClass.kt:220)←ImplementationUtilsKt.acceptList(implementationUtils.kt:15)←UFile.accept(UFile.kt:89)←UastLintUtilsKt.acceptSourceFile(UastLintUtils.kt:1026)←UElementVisitor$visitFile$2.run(UElementVisitor.kt:202)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←UElementVisitor.visitFile(UElementVisitor.kt:200)←LintDriver$visitUastDetectors$1.run(LintDriver.kt:2106)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←LintDriver.visitUastDetectors(LintDriver.kt:2104)←LintDriver.visitUast(LintDriver.kt:2090)←LintDriver.runFileDetectors(LintDriver.kt:1288)←LintDriver.checkProject(LintDriver.kt:1072)←LintDriver.checkProjectRoot(LintDriver.kt:624)←LintDriver.access$checkProjectRoot(LintDriver.kt:176)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:447)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)\\\`
+     
+     You can run with --stacktrace or set environment variable \\\`LINT_PRINT_STACKTRACE=true\\\` to dump a full stacktrace to stdout.
+     Stack: \`RuntimeException:LintDriver$Companion.handleDetectorError(LintDriver.kt:3880)←LintDriver$Companion.handleDetectorError$default(LintDriver.kt:3739)←LintDriver$Companion.handleDetectorError(LintDriver.kt:3736)←UElementVisitor.visitFile(UElementVisitor.kt:244)←LintDriver$visitUastDetectors$1.run(LintDriver.kt:2106)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←LintDriver.visitUastDetectors(LintDriver.kt:2104)←LintDriver.visitUast(LintDriver.kt:2090)←LintDriver.runFileDetectors(LintDriver.kt:1288)←LintDriver.checkProject(LintDriver.kt:1072)←LintDriver.checkProjectRoot(LintDriver.kt:624)←LintDriver.access$checkProjectRoot(LintDriver.kt:176)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:447)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)\`
+     
+     You can run with --stacktrace or set environment variable \`LINT_PRINT_STACKTRACE=true\` to dump a full stacktrace to stdout.
+     Stack: `RuntimeException:LintDriver$Companion.handleDetectorError(LintDriver.kt:3880)←LintDriver$Companion.handleDetectorError$default(LintDriver.kt:3739)←LintDriver$Companion.handleDetectorError(LintDriver.kt:3736)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:449)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)`
+     
+     You can run with --stacktrace or set environment variable `LINT_PRINT_STACKTRACE=true` to dump a full stacktrace to stdout.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:lintAnalyzeDebugUnitTest'.
+> A failure occurred while executing com.android.build.gradle.internal.lint.AndroidLintWorkAction
+   > Unexpected failure during lint analysis (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Unexpected failure during lint analysis (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Unexpected failure during lint analysis of AndroidPersistenceTest.kt (this is a bug in lint or one of the libraries it depends on)
+     
+     Message: Error while resolving org.jetbrains.kotlin.fir.declarations.impl.FirRegularClassImpl 
+     from RAW_FIR to COMPILER_REQUIRED_ANNOTATIONS
+     current declaration phase RAW_FIR
+     origin: Source
+     session: class org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSourcesSession
+     module data: class org.jetbrains.kotlin.analysis.low.level.api.fir.projectStructure.LLFirModuleData
+     KaModule: class org.jetbrains.kotlin.analysis.project.structure.impl.KaSourceModuleImpl
+     platform: JVM (1.8)
+     
+     Stack: \\\`KotlinIllegalArgumentExceptionWithAttachments:LLFirModuleLazyDeclarationResolverKt.handleExceptionFromResolve(LLFirModuleLazyDeclarationResolver.kt:225)←LLFirModuleLazyDeclarationResolverKt.access$handleExceptionFromResolve(LLFirModuleLazyDeclarationResolver.kt:1)←LLFirModuleLazyDeclarationResolver.lazyResolve(LLFirModuleLazyDeclarationResolver.kt:224)←LLFirLazyDeclarationResolver.lazyResolveToPhase(LLFirLazyDeclarationResolver.kt:27)←FirLazyDeclarationResolverKt$lazyResolveToPhase$1.invoke(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt$lazyResolveToPhase$1.invoke(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt.invokeLazyResolveToPhase(FirLazyDeclarationResolver.kt:213)←FirLazyDeclarationResolverKt.lazyResolveToPhase(FirLazyDeclarationResolver.kt:134)←FirLazyDeclarationResolverKt.lazyResolveToPhase(FirLazyDeclarationResolver.kt:125)←FirBasedSymbolKt.resolvedCompilerRequiredAnnotations(FirBasedSymbol.kt:74)←FirAnnotationUtilsKt.hasAnnotation(firAnnotationUtils.kt:192)←FirAnnotationUtilsKt.hasAnnotation$default(firAnnotationUtils.kt:181)←KaFirAnnotationListForDeclaration.contains(KaFirAnnotationListForDeclaration.kt:50)←SymbolAnnotationsProvider.contains(SymbolAnnotationsProvider.kt:37)←GranularAnnotationsBox.hasAnnotation(GranularAnnotationsBox.kt:80)←SymbolLightModifierList.hasAnnotation(SymbolLightModifierList.kt:52)←SymbolLightClassForClassOrObject.isRecord(SymbolLightClassForClassOrObject.kt:271)←PsiClassImplUtil.getExtendsListTypes(PsiClassImplUtil.java:960)←SymbolLightClassBase.getExtendsListTypes(SymbolLightClassBase.kt:155)←PsiClassImplUtil.getSuperTypes(PsiClassImplUtil.java:821)←SymbolLightClassForClassLike.getSuperTypes(SymbolLightClassForClassLike.kt:172)←InheritanceUtil.getSuperClasses(InheritanceUtil.java:92)←InheritanceUtil.getSuperClasses(InheritanceUtil.java:97)←UElementVisitor$SuperclassUastVisitor.getRelevantDetectors(UElementVisitor.kt:373)←UElementVisitor$SuperclassUastVisitor.visitClass(UElementVisitor.kt:364)←AbstractKotlinUClass.accept(AbstractKotlinUClass.kt:220)←ImplementationUtilsKt.acceptList(implementationUtils.kt:15)←UFile.accept(UFile.kt:89)←UastLintUtilsKt.acceptSourceFile(UastLintUtils.kt:1026)←UElementVisitor$visitFile$2.run(UElementVisitor.kt:202)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←UElementVisitor.visitFile(UElementVisitor.kt:200)←LintDriver$visitUastDetectors$1.run(LintDriver.kt:2106)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←LintDriver.visitUastDetectors(LintDriver.kt:2104)←LintDriver.visitUast(LintDriver.kt:2090)←LintDriver.runFileDetectors(LintDriver.kt:1288)←LintDriver.checkProject(LintDriver.kt:1072)←LintDriver.checkProjectRoot(LintDriver.kt:624)←LintDriver.access$checkProjectRoot(LintDriver.kt:176)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:447)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)\\\`
+     
+     You can run with --stacktrace or set environment variable \\\`LINT_PRINT_STACKTRACE=true\\\` to dump a full stacktrace to stdout.
+     Stack: \`RuntimeException:LintDriver$Companion.handleDetectorError(LintDriver.kt:3880)←LintDriver$Companion.handleDetectorError$default(LintDriver.kt:3739)←LintDriver$Companion.handleDetectorError(LintDriver.kt:3736)←UElementVisitor.visitFile(UElementVisitor.kt:244)←LintDriver$visitUastDetectors$1.run(LintDriver.kt:2106)←LintClient.runReadAction(LintClient.kt:1738)←LintCliClient.runReadAction(LintCliClient.kt:231)←LintDriver$LintClientWrapper.runReadAction(LintDriver.kt:2826)←LintDriver.visitUastDetectors(LintDriver.kt:2104)←LintDriver.visitUast(LintDriver.kt:2090)←LintDriver.runFileDetectors(LintDriver.kt:1288)←LintDriver.checkProject(LintDriver.kt:1072)←LintDriver.checkProjectRoot(LintDriver.kt:624)←LintDriver.access$checkProjectRoot(LintDriver.kt:176)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:447)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)\`
+     
+     You can run with --stacktrace or set environment variable \`LINT_PRINT_STACKTRACE=true\` to dump a full stacktrace to stdout.
+     Stack: `RuntimeException:LintDriver$Companion.handleDetectorError(LintDriver.kt:3880)←LintDriver$Companion.handleDetectorError$default(LintDriver.kt:3739)←LintDriver$Companion.handleDetectorError(LintDriver.kt:3736)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:449)←LintDriver$analyzeOnly$1.invoke(LintDriver.kt:444)←LintDriver.doAnalyze(LintDriver.kt:503)←LintDriver.analyzeOnly(LintDriver.kt:444)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:276)←LintCliClient$analyzeOnly$1.invoke(LintCliClient.kt:273)←LintCliClient.run(LintCliClient.kt:330)←LintCliClient.analyzeOnly(LintCliClient.kt:273)←Main.run(Main.java:1773)←Main.run(Main.java:283)←DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)←Method.invoke(Method.java:580)←AndroidLintWorkAction.invokeLintMainRunMethod(AndroidLintWorkAction.kt:103)←AndroidLintWorkAction.runLint(AndroidLintWorkAction.kt:90)←AndroidLintWorkAction.execute(AndroidLintWorkAction.kt:64)←DefaultWorkerServer.execute(DefaultWorkerServer.java:63)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)←NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)←ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)←NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)←AbstractWorker$1.call(AbstractWorker.java:44)←AbstractWorker$1.call(AbstractWorker.java:41)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)←DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)←DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)←DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)←DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)←AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)←NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)←DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)←FutureTask.run(FutureTask.java:317)←DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)←DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)←DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)←Factories$1.create(Factories.java:31)←DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)←DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)←DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)←DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)←Executors$RunnableAdapter.call(Executors.java:572)←FutureTask.run(FutureTask.java:317)←ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)←AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)←ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)←ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)←Thread.run(Thread.java:1583)`
+     
+     You can run with --stacktrace or set environment variable `LINT_PRINT_STACKTRACE=true` to dump a full stacktrace to stdout.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 1m 25s
+76 actionable tasks: 76 executed

@@ -1,0 +1,845 @@
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -11,8 +11,8 @@
+         applicationId = "com.lyra.sona.android"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 3
+-        versionName = "1.0.2"
++        versionCode = 4
++        versionName = "1.0.3"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+     buildFeatures { compose = true; buildConfig = true }
+@@ -40,6 +40,7 @@
+     debugImplementation("androidx.compose.ui:ui-tooling")
+     implementation("androidx.media3:media3-exoplayer:1.11.1")
+     implementation("androidx.media3:media3-session:1.11.1")
++    implementation("androidx.media3:media3-inspector:1.11.1")
+     implementation("androidx.room:room-runtime:2.8.3")
+     implementation("androidx.room:room-ktx:2.8.3")
+     kapt("androidx.room:room-compiler:2.8.3")
+--- a/android/app/src/main/java/com/lyra/sona/android/data/Preferences.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/data/Preferences.kt
+@@ -16,16 +16,18 @@
+ private val Context.lyraDataStore by preferencesDataStore("lyra")
+ 
+ data class PlaybackSnapshot(val queue: List<String> = emptyList(), val index: Int = 0, val positionMs: Long = 0,
+-    val shuffle: Boolean = false, val repeat: Int = 0, val shuffleOrder: List<Int> = emptyList()) {
++    val shuffle: Boolean = false, val repeat: Int = 0, val shuffleOrder: List<Int> = emptyList(), val explicitQueue: List<Int> = emptyList()) {
+     fun encode(): String = JSONObject().put("queue", JSONArray(queue)).put("index", index).put("position", positionMs)
+-        .put("shuffle", shuffle).put("repeat", repeat).put("order", JSONArray(shuffleOrder)).toString()
++        .put("shuffle", shuffle).put("repeat", repeat).put("order", JSONArray(shuffleOrder)).put("explicitQueue", JSONArray(explicitQueue)).toString()
+     companion object {
+         fun decode(raw: String): PlaybackSnapshot = try {
+             val json = JSONObject(raw)
+             val queue = json.optJSONArray("queue") ?: JSONArray()
+             val order = json.optJSONArray("order") ?: JSONArray()
++            val explicit = json.optJSONArray("explicitQueue") ?: JSONArray()
+             PlaybackSnapshot(List(queue.length()) { queue.getString(it) }, json.optInt("index"), json.optLong("position"),
+-                json.optBoolean("shuffle"), json.optInt("repeat").coerceIn(0, 2), List(order.length()) { order.getInt(it) })
++                json.optBoolean("shuffle"), json.optInt("repeat").coerceIn(0, 2), List(order.length()) { order.getInt(it) },
++                List(explicit.length()) { explicit.getInt(it) }.filter { it in 0 until queue.length() }.distinct())
+         } catch (_: Exception) { PlaybackSnapshot() }
+     }
+ }
+--- a/android/app/src/main/java/com/lyra/sona/android/library/AndroidDocuments.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/library/AndroidDocuments.kt
+@@ -17,6 +17,13 @@
+ import kotlinx.coroutines.sync.withPermit
+ import java.io.File
+ import kotlin.coroutines.resumeWithException
++import androidx.media3.common.MediaItem
++import androidx.media3.common.MediaMetadata
++import androidx.media3.inspector.MetadataRetriever
++import com.google.common.util.concurrent.ListenableFuture
++import com.google.common.util.concurrent.MoreExecutors
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.withTimeoutOrNull
+ 
+ class AndroidDocuments(private val context: Context, private val artwork: ArtworkCache) : DocumentSource {
+     private val resolver = context.contentResolver
+@@ -167,28 +174,82 @@
+     }
+ }
+ 
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+ class AndroidMetadata(private val context: Context, private val artwork: ArtworkCache) : MetadataSource {
+     companion object { private val workers = Semaphore(4) }
+     override suspend fun read(tree: String, folderId: String, entry: DocumentEntry, uri: String): Track = workers.withPermit { withContext(Dispatchers.IO) {
+         currentCoroutineContext().ensureActive()
++        val values = mutableMapOf<Int, String>()
++        var picture: ByteArray? = null
+         val reader = MediaMetadataRetriever()
+         try {
+             reader.setDataSource(context, Uri.parse(uri))
+-            fun value(key: Int) = reader.extractMetadata(key).orEmpty().trim()
+-            val art = reader.embeddedPicture?.takeIf { it.size <= 16 * 1024 * 1024 }?.let { bytes ->
+-                currentCoroutineContext().ensureActive()
+-                // A shared album cover is decoded once even when embedded in hundreds of files.
+-                val contentKey = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+-                artwork.save("embedded-$contentKey", bytes)
+-            } ?: ("" to "")
+-            val duration = value(MediaMetadataRetriever.METADATA_KEY_DURATION).toLongOrNull() ?: 0
+-            Track(stableId(tree, entry.documentId), tree, entry.documentId, folderId, uri, entry.name, entry.size, entry.modified,
+-                value(MediaMetadataRetriever.METADATA_KEY_TITLE).ifBlank { entry.name.substringBeforeLast('.') },
+-                value(MediaMetadataRetriever.METADATA_KEY_ARTIST).ifBlank { "Unknown artist" },
+-                value(MediaMetadataRetriever.METADATA_KEY_ALBUM), value(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
+-                value(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER).substringBefore('/').toIntOrNull() ?: 0,
+-                value(MediaMetadataRetriever.METADATA_KEY_YEAR), value(MediaMetadataRetriever.METADATA_KEY_GENRE), duration,
+-                art.first, art.second, if (duration <= 0) "Provider or Android decoder did not expose duration; metadata will be retried." else "")
++            for (key in listOf(MediaMetadataRetriever.METADATA_KEY_TITLE, MediaMetadataRetriever.METADATA_KEY_ARTIST,
++                MediaMetadataRetriever.METADATA_KEY_ALBUM, MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST,
++                MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER, MediaMetadataRetriever.METADATA_KEY_YEAR,
++                MediaMetadataRetriever.METADATA_KEY_GENRE, MediaMetadataRetriever.METADATA_KEY_DURATION)) {
++                values[key] = runCatching { reader.extractMetadata(key).orEmpty().trim() }.getOrDefault("")
++            }
++            picture = runCatching { reader.embeddedPicture }.getOrNull()
++        } catch (_: Exception) {
++            // Some SAF providers / codecs play in Media3 but fail the platform retriever.
+         } finally { reader.release() }
++        currentCoroutineContext().ensureActive()
++        fun value(key: Int) = values[key].orEmpty()
++        var art = savePicture(picture)
++        var duration = value(MediaMetadataRetriever.METADATA_KEY_DURATION).toLongOrNull() ?: 0
++        var fallback = MediaMetadata.EMPTY
++        var inspectionFailed = false
++        if (art.first.isEmpty() || duration <= 0) {
++            try {
++                val inspected = withTimeoutOrNull(15000) {
++                    MetadataRetriever.Builder(context, MediaItem.fromUri(uri)).build().use { retriever ->
++                        val groups = retriever.retrieveTrackGroups().awaitResult()
++                        val builder = MediaMetadata.Builder()
++                        for (groupIndex in 0 until groups.length) {
++                            val group = groups[groupIndex]
++                            for (formatIndex in 0 until group.length) {
++                                val tags = group.getFormat(formatIndex).metadata ?: continue
++                                for (tagIndex in 0 until tags.length()) tags[tagIndex].populateMediaMetadata(builder)
++                            }
++                        }
++                        builder.build() to (if (duration <= 0) retriever.retrieveDurationUs().awaitResult() / 1000 else duration)
++                    }
++                }
++                if (inspected == null) inspectionFailed = true else {
++                    fallback = inspected.first
++                    if (duration <= 0) duration = inspected.second.coerceAtLeast(0)
++                    if (art.first.isEmpty()) art = savePicture(fallback.artworkData)
++                }
++            } catch (cancelled: CancellationException) { throw cancelled }
++            catch (_: Exception) { inspectionFailed = true }
++        }
++        Track(stableId(tree, entry.documentId), tree, entry.documentId, folderId, uri, entry.name, entry.size, entry.modified,
++            value(MediaMetadataRetriever.METADATA_KEY_TITLE).ifBlank { fallback.title?.toString().orEmpty().ifBlank { entry.name.substringBeforeLast('.') } },
++            value(MediaMetadataRetriever.METADATA_KEY_ARTIST).ifBlank { fallback.artist?.toString().orEmpty().ifBlank { "Unknown artist" } },
++            value(MediaMetadataRetriever.METADATA_KEY_ALBUM).ifBlank { fallback.albumTitle?.toString().orEmpty() },
++            value(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST).ifBlank { fallback.albumArtist?.toString().orEmpty() },
++            value(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER).substringBefore('/').toIntOrNull() ?: fallback.trackNumber ?: 0,
++            value(MediaMetadataRetriever.METADATA_KEY_YEAR).ifBlank { fallback.releaseYear?.toString().orEmpty() },
++            value(MediaMetadataRetriever.METADATA_KEY_GENRE).ifBlank { fallback.genre?.toString().orEmpty() }, duration,
++            art.first, art.second, when {
++                duration <= 0 -> "Provider or decoder did not expose duration; metadata will be retried."
++                inspectionFailed -> "Artwork inspection failed; metadata will be retried."
++                else -> ""
++            })
+     } }
+-}
++
++    private fun savePicture(bytes: ByteArray?): Pair<String, String> {
++        if (bytes == null || bytes.size > 16 * 1024 * 1024) return "" to ""
++        val key = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
++        return artwork.save("embedded-$key", bytes)
++    }
++}
++
++private suspend fun <T> ListenableFuture<T>.awaitResult(): T = suspendCancellableCoroutine { continuation ->
++    continuation.invokeOnCancellation { cancel(true) }
++    addListener({
++        try { continuation.resume(get()) { _, _, _ -> } }
++        catch (error: Exception) { continuation.resumeWithException(error.cause ?: error) }
++    }, MoreExecutors.directExecutor())
++}
+--- a/android/app/src/main/java/com/lyra/sona/android/library/LibraryDatabase.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/library/LibraryDatabase.kt
+@@ -7,6 +7,8 @@
+ import androidx.room.Query
+ import androidx.room.RoomDatabase
+ import androidx.room.Transaction
++import androidx.room.migration.Migration
++import androidx.sqlite.db.SupportSQLiteDatabase
+ import kotlinx.coroutines.flow.Flow
+ 
+ @Dao
+@@ -29,5 +31,14 @@
+     @Transaction open suspend fun retainTree(tree: String) { clearOtherTracks(tree); clearOtherFolders(tree) }
+ }
+ 
+-@Database(entities = [Track::class, Folder::class], version = 1, exportSchema = false)
+-abstract class LibraryDatabase : RoomDatabase() { abstract fun library(): LibraryDao }
++@Database(entities = [Track::class, Folder::class], version = 2, exportSchema = false)
++abstract class LibraryDatabase : RoomDatabase() {
++    abstract fun library(): LibraryDao
++    companion object {
++        val ARTWORK_MIGRATION = object : Migration(1, 2) {
++            override fun migrate(db: SupportSQLiteDatabase) {
++                db.execSQL("ALTER TABLE tracks ADD COLUMN metadataVersion INTEGER NOT NULL DEFAULT 0")
++            }
++        }
++    }
++}
+--- a/android/app/src/main/java/com/lyra/sona/android/library/LibraryModels.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/library/LibraryModels.kt
+@@ -1,6 +1,7 @@
+ package com.lyra.sona.android.library
+ 
+ import androidx.room.Entity
++import androidx.room.ColumnInfo
+ import androidx.room.PrimaryKey
+ import java.security.MessageDigest
+ 
+@@ -12,7 +13,8 @@
+     val isDirectory: Boolean get() = mime == DIRECTORY_MIME
+     val isAudio: Boolean get() = !isDirectory && (mime?.startsWith("audio/", ignoreCase = true) == true ||
+         name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT) in AUDIO_EXTENSIONS)
+-    val isImage: Boolean get() = !isDirectory && name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT) in setOf("jpg", "jpeg", "png", "webp")
++    val isImage: Boolean get() = !isDirectory && (mime?.startsWith("image/", ignoreCase = true) == true ||
++        name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT) in setOf("jpg", "jpeg", "png", "webp", "bmp", "gif", "heic", "heif", "avif"))
+ }
+ 
+ @Entity(tableName = "tracks")
+@@ -36,8 +38,9 @@
+     val thumbnail: String = "",
+     val artwork: String = "",
+     val metadataError: String = "",
++    @ColumnInfo(defaultValue = "0") val metadataVersion: Int = 1,
+ ) {
+-    fun matches(entry: DocumentEntry) = metadataError.isEmpty() && entry.size != null && entry.modified != null &&
++    fun matches(entry: DocumentEntry) = metadataVersion >= 1 && metadataError.isEmpty() && entry.size != null && entry.modified != null &&
+         entry.modified > 0 && size == entry.size && modified == entry.modified && fileName == entry.name &&
+         (thumbnail.isEmpty() || java.io.File(thumbnail).isFile) && (artwork.isEmpty() || java.io.File(artwork).isFile)
+     fun matchesSearch(query: String): Boolean = listOf(title, artist, album, albumArtist, year, genre, fileName)
+@@ -97,3 +100,12 @@
+         if (track.artwork.isEmpty() && donor != null && track.album.isNotBlank()) track.copy(artwork = donor.artwork, thumbnail = donor.thumbnail) else track
+     }
+ }
++
++/** Folder art is a display fallback only; never write it into intrinsic track metadata. */
++fun resolveLibraryArtwork(tracks: List<Track>, folders: List<Folder>): List<Track> {
++    val covers = folders.associateBy { it.id }
++    return resolveAlbumArtwork(tracks).map { track ->
++        val cover = covers[track.folderId]?.thumbnail.orEmpty()
++        if (track.artwork.isEmpty() && cover.isNotEmpty()) track.copy(thumbnail = cover, artwork = cover) else track
++    }
++}
+--- a/android/app/src/main/java/com/lyra/sona/android/library/LibraryRepository.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/library/LibraryRepository.kt
+@@ -27,7 +27,7 @@
+     val snapshot: StateFlow<LibrarySnapshot> = combine(dao.observeTracks(), dao.observeFolders(), preferences.tree) { _, _, selected ->
+         // Flow notifications can arrive separately even after one Room commit. Read both tables together.
+         val cached = dao.snapshot(selected)
+-        cached.copy(tracks = resolveAlbumArtwork(cached.tracks).sortedWith(trackComparator),
++        cached.copy(tracks = resolveLibraryArtwork(cached.tracks, cached.folders).sortedWith(trackComparator),
+             folders = cached.folders.sortedWith { a, b -> if (a.isRoot != b.isRoot) if (a.isRoot) -1 else 1 else naturalCompare(a.name, b.name) })
+     }.stateIn(scope, SharingStarted.Eagerly, LibrarySnapshot())
+     val progress = MutableStateFlow(ScanProgress())
+--- a/android/app/src/main/java/com/lyra/sona/android/library/ScanEngine.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/library/ScanEngine.kt
+@@ -43,9 +43,11 @@
+             val images = entries.filter { it.isImage }.sortedWith(compareBy<DocumentEntry> {
+                 when (it.name.substringBeforeLast('.').lowercase()) { "cover" -> 0; "folder" -> 1; "front" -> 2; else -> 3 }
+             }.thenComparator { a, b -> naturalCompare(a.name, b.name) })
+-            val cover = images.firstOrNull()?.let {
+-                try { documents.cover(tree, it) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { "" }
+-            }.orEmpty()
++            var cover = ""
++            for (image in images) {
++                cover = try { documents.cover(tree, image) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { "" }
++                if (cover.isNotEmpty()) break
++            }
+             if (audio.isNotEmpty() || folderDocument == rootId) folders += Folder(folderId, tree, folderDocument, name, folderDocument == rootId, cover)
+             audio.forEach { candidates += folderId to it }
+             entries.filter { it.isDirectory }.forEach { pending.add(it.documentId to it.name) }
+--- a/android/app/src/main/java/com/lyra/sona/android/LyraApplication.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/LyraApplication.kt
+@@ -14,7 +14,7 @@
+ 
+ class LyraApplication : Application() {
+     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+-    val database by lazy { Room.databaseBuilder(this, LibraryDatabase::class.java, "library.db").build() }
++    val database by lazy { Room.databaseBuilder(this, LibraryDatabase::class.java, "library.db").addMigrations(LibraryDatabase.ARTWORK_MIGRATION).build() }
+     val preferences by lazy { Preferences(this) }
+     val artwork by lazy { ArtworkCache(this) }
+     val documents by lazy { AndroidDocuments(this, artwork) }
+--- a/android/app/src/main/java/com/lyra/sona/android/MainActivity.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/MainActivity.kt
+@@ -9,6 +9,9 @@
+ import androidx.activity.SystemBarStyle
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.activity.viewModels
++import androidx.core.view.WindowCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.core.view.WindowInsetsControllerCompat
+ import com.lyra.sona.android.ui.LyraApp
+ import com.lyra.sona.android.ui.LyraViewModel
+ 
+@@ -25,12 +28,24 @@
+         super.onCreate(savedInstanceState)
+         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
++        hideSystemBars()
+         setContent {
+             LyraApp(model) {
+                 folderPicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
+             }
+         }
+     }
++    private fun hideSystemBars() {
++        WindowCompat.getInsetsController(window, window.decorView).apply {
++            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
++            hide(WindowInsetsCompat.Type.systemBars())
++        }
++    }
++    override fun onResume() { super.onResume(); hideSystemBars() }
++    override fun onWindowFocusChanged(hasFocus: Boolean) {
++        super.onWindowFocusChanged(hasFocus)
++        if (hasFocus) hideSystemBars()
++    }
+     override fun onStart() { super.onStart(); model.setUiActive(true); model.refresh() }
+     override fun onStop() { model.setUiActive(false); super.onStop() }
+ }
+--- a/android/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
+@@ -12,6 +12,7 @@
+ import androidx.media3.common.Player
+ import androidx.media3.common.util.UnstableApi
+ import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.exoplayer.DefaultLoadControl
+ import androidx.media3.exoplayer.source.ShuffleOrder
+ import androidx.media3.session.MediaSession
+ import androidx.media3.session.MediaSessionService
+@@ -24,7 +25,7 @@
+ import com.lyra.sona.android.MainActivity
+ import com.lyra.sona.android.data.PlaybackSnapshot
+ import com.lyra.sona.android.library.Track
+-import com.lyra.sona.android.library.resolveAlbumArtwork
++import com.lyra.sona.android.library.resolveLibraryArtwork
+ import kotlinx.coroutines.*
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.flow.MutableStateFlow
+@@ -52,12 +53,19 @@
+     override fun onCreate() {
+         super.onCreate()
+         graph = application as LyraApplication
+-        player = ExoPlayer.Builder(this).build().apply {
++        player = ExoPlayer.Builder(this).setLoadControl(DefaultLoadControl.Builder()
++            .setBufferDurationsMsForLocalPlayback(5000, 30000, 150, 300)
++            .setBackBuffer(30000, false).build()).build().apply {
+             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
+             setHandleAudioBecomingNoisy(true)
+             setWakeMode(C.WAKE_MODE_LOCAL)
+             addListener(object : Player.Listener {
+                 override fun onEvents(player: Player, events: Player.Events) {
++                    val current = player.currentMediaItem
++                    if (current?.isExplicitlyQueued() == true) {
++                        // An explicit occurrence leaves the pending queue when it starts playing.
++                        player.replaceMediaItem(player.currentMediaItemIndex, current.withQueueFlag(false))
++                    }
+                     protectArtwork()
+                     if (!restoring.value && (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                             events.contains(Player.EVENT_POSITION_DISCONTINUITY) || events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED) ||
+@@ -104,7 +112,8 @@
+                         val available = library.tracks.associateBy { it.id }
+                         val ids = args.getStringArrayList("ids").orEmpty()
+                         if (ids.any { it !in available }) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+-                        enqueueItems(player, ids.map { available.getValue(it).mediaItem() }, args.getBoolean("next"))
++                        enqueueItems(player, ids.map { available.getValue(it).mediaItem().withQueueFlag(true) }, args.getBoolean("next"))
++                        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) player.prepare()
+                     }
+                     QueueCommands.move -> moveQueuedItem(player, args.getInt("from", -1), args.getInt("to", -1))
+                     else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+@@ -117,10 +126,14 @@
+             try {
+                 val tree = graph.preferences.tree.first()
+                 val saved = graph.preferences.playback.first()
+-                val tracks = resolveAlbumArtwork(graph.database.library().tracks(tree)).associateBy { it.id }
++                val cached = graph.database.library().snapshot(tree)
++                val tracks = resolveLibraryArtwork(cached.tracks, cached.folders).associateBy { it.id }
+                 val restored = reconcileQueue(saved.queue, saved.index, saved.positionMs, saved.shuffleOrder, tracks.keys)
++                val retained = saved.queue.indices.filter { saved.queue[it] in tracks }
+                 if (restored.ids.isNotEmpty()) {
+-                    player.setMediaItems(restored.ids.map { tracks.getValue(it).mediaItem() }, restored.index, restored.positionMs)
++                    player.setMediaItems(restored.ids.mapIndexed { index, id ->
++                        tracks.getValue(id).mediaItem().withQueueFlag(retained[index] in saved.explicitQueue && index != restored.index)
++                    }, restored.index, restored.positionMs)
+                     player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(restored.order.toIntArray(), 0L))
+                     player.shuffleModeEnabled = saved.shuffle
+                     player.repeatMode = saved.repeat
+@@ -153,7 +166,8 @@
+     }
+ 
+     private fun snapshot() = PlaybackSnapshot((0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId },
+-        player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0), player.shuffleModeEnabled, player.repeatMode, shuffleIndices())
++        player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0), player.shuffleModeEnabled, player.repeatMode, shuffleIndices(),
++        (0 until player.mediaItemCount).filter { player.getMediaItemAt(it).isExplicitlyQueued() })
+ 
+     private fun save() {
+         if (restoring.value) return
+--- a/android/app/src/main/java/com/lyra/sona/android/playback/QueueOperations.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/playback/QueueOperations.kt
+@@ -13,6 +13,16 @@
+ object QueueCommands {
+     val enqueue = SessionCommand("com.lyra.sona.ENQUEUE", Bundle.EMPTY)
+     val move = SessionCommand("com.lyra.sona.MOVE", Bundle.EMPTY)
++}
++
++private const val EXPLICIT_QUEUE = "explicitQueue"
++fun MediaItem.isExplicitlyQueued() = mediaMetadata.extras?.getBoolean(EXPLICIT_QUEUE, false) == true
++fun MediaItem.withQueueFlag(queued: Boolean): MediaItem = buildUpon().setMediaMetadata(mediaMetadata.buildUpon()
++    .setExtras(Bundle(mediaMetadata.extras ?: Bundle.EMPTY).apply { putBoolean(EXPLICIT_QUEUE, queued) }).build()).build()
++
++fun explicitQueueIndices(items: List<MediaItem>, order: List<Int>, currentIndex: Int): List<Int> {
++    val traversal = order.takeIf { validShuffleOrder(it, items.size) } ?: items.indices.toList()
++    return traversal.filter { it != currentIndex && items[it].isExplicitlyQueued() }
+ }
+ 
+ fun shuffleIndices(player: Player): List<Int> {
+@@ -62,7 +72,7 @@
+         val item = player.getMediaItemAt(index)
+         val updated = available.getValue(item.mediaId).mediaItem()
+         // Keep the existing source configuration for metadata-only changes.
+-        val replacement = item.buildUpon().setMediaMetadata(updated.mediaMetadata).build()
++        val replacement = item.buildUpon().setMediaMetadata(updated.mediaMetadata).build().withQueueFlag(item.isExplicitlyQueued())
+         val oldExtras = item.mediaMetadata.extras
+         val newExtras = replacement.mediaMetadata.extras
+         if (item.mediaMetadata != replacement.mediaMetadata || oldExtras?.getLong("durationMs") != newExtras?.getLong("durationMs") ||
+--- a/android/app/src/main/java/com/lyra/sona/android/ui/LyraApp.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/ui/LyraApp.kt
+@@ -124,7 +124,10 @@
+                         PlaylistScreen(library.folders.firstOrNull { it.id == id }, library.tracks.filter { it.folderId == id }, model)
+                     }
+                     composable("player") { PlayerScreen(playback, model) { navigate("queue") } }
+-                    composable("queue") { QueueScreen(playback, model) }
++                    composable("queue") {
++                        LaunchedEffect(playback.explicitQueue.isEmpty()) { if (playback.explicitQueue.isEmpty()) nav.popBackStack() }
++                        QueueScreen(playback, model)
++                    }
+                 }
+             }
+         }
+@@ -263,14 +266,14 @@
+     LazyColumn(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF28241A), Background))), contentPadding = PaddingValues(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+         item { Text("NOW PLAYING", color = Gold, style = MaterialTheme.typography.labelMedium); Spacer(Modifier.height(24.dp)) }
+         item {
+-            Artwork(item?.mediaMetadata?.extras?.getString("playerArtwork").orEmpty().ifEmpty { item?.mediaMetadata?.artworkUri?.toString().orEmpty() },
++            Artwork(playback.currentArtwork.ifEmpty { item?.mediaMetadata?.artworkUri?.toString().orEmpty() },
+                 "Now playing artwork", Modifier.fillMaxWidth().widthIn(max = 440.dp).aspectRatio(1f), playerSize = true)
+             Spacer(Modifier.height(24.dp))
+             Text(item?.mediaMetadata?.title?.toString() ?: "Nothing playing", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+             Text(item?.mediaMetadata?.artist?.toString().orEmpty(), color = Muted)
+         }
+         item {
+-            var scrub by remember { mutableStateOf<Float?>(null) }
++            var scrub by remember(playback.current?.mediaId, playback.currentIndex) { mutableStateOf<Float?>(null) }
+             val max = playback.duration.coerceAtLeast(1).toFloat()
+             Slider(value = (scrub ?: playback.position.toFloat()).coerceIn(0f, max), onValueChange = { scrub = it },
+                 onValueChangeFinished = { scrub?.let { model.seek(it.toLong()) }; scrub = null }, valueRange = 0f..max,
+@@ -289,18 +292,18 @@
+                     tint = if (playback.repeat == Player.REPEAT_MODE_OFF) Muted else Gold) { model.repeat() }
+             }
+             Spacer(Modifier.height(20.dp))
+-            TextButton(onClick = queue) { Icon(Icons.AutoMirrored.Outlined.QueueMusic, null); Spacer(Modifier.width(8.dp)); Text("Queue · ${playback.queue.size}") }
+-            Text("Use your phone’s volume buttons to adjust sound.", color = Muted, style = MaterialTheme.typography.bodySmall)
++            if (playback.explicitQueue.isNotEmpty()) TextButton(onClick = queue) {
++                Icon(Icons.AutoMirrored.Outlined.QueueMusic, null); Spacer(Modifier.width(8.dp)); Text("Queue · ${playback.explicitQueue.size}")
++            }
+         }
+     }
+ }
+ 
+ @Composable
+ private fun QueueScreen(playback: PlaybackUi, model: LyraViewModel) {
+-    val order = playback.queueOrder.takeIf { validQueueOrder(it, playback.queue.size) } ?: playback.queue.indices.toList()
++    val order = playback.explicitQueue
+     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
+-        item { SectionTitle("Your queue · ${playback.queue.size}") }
+-        if (playback.queue.isEmpty()) item { Text("Add tracks from a playlist or search.", Modifier.padding(8.dp), color = Muted) }
++        if (order.isNotEmpty()) item { SectionTitle("Your queue · ${order.size}") }
+         items(order.size, key = { "${playback.queue[order[it]].mediaId}:${order[it]}" }) { displayIndex ->
+             val index = order[displayIndex]
+             val item = playback.queue[index]
+@@ -323,7 +326,6 @@
+         }
+     }
+ }
+-private fun validQueueOrder(order: List<Int>, size: Int) = order.size == size && order.toSet() == (0 until size).toSet()
+ 
+ @Composable
+ private fun SettingsScreen(tree: String, model: LyraViewModel, choose: () -> Unit) {
+@@ -394,7 +396,7 @@
+ private fun Artwork(path: String, description: String, modifier: Modifier, icon: ImageVector = Icons.Outlined.MusicNote, playerSize: Boolean = false) {
+     Surface(modifier, shape = RoundedCornerShape(if (playerSize) 20.dp else 10.dp), color = Color(0xFF29271F)) {
+         if (path.isEmpty()) Box(contentAlignment = Alignment.Center) { Icon(icon, description, tint = Gold, modifier = Modifier.fillMaxSize().padding(12.dp)) }
+-        else AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(if (path.startsWith("file:")) Uri.parse(path) else File(path))
++        else AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(if (path.startsWith("file:") || path.startsWith("content:")) Uri.parse(path) else File(path))
+             .size(if (playerSize) 1024 else 256).crossfade(true).build(), contentDescription = description, contentScale = ContentScale.Crop,
+             error = painterResource(R.drawable.lyra_logo))
+     }
+--- a/android/app/src/main/java/com/lyra/sona/android/ui/LyraViewModel.kt
++++ b/android/app/src/main/java/com/lyra/sona/android/ui/LyraViewModel.kt
+@@ -22,6 +22,7 @@
+ import com.lyra.sona.android.playback.mediaItem
+ import com.lyra.sona.android.playback.QueueCommands
+ import com.lyra.sona.android.playback.shuffleIndices
++import com.lyra.sona.android.playback.explicitQueueIndices
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.Job
+@@ -34,7 +35,9 @@
+ 
+ data class PlaybackUi(val ready: Boolean = false, val current: MediaItem? = null, val playing: Boolean = false,
+     val position: Long = 0, val duration: Long = 0, val queue: List<MediaItem> = emptyList(), val currentIndex: Int = -1,
+-    val shuffle: Boolean = false, val repeat: Int = Player.REPEAT_MODE_OFF, val queueOrder: List<Int> = emptyList())
++    val shuffle: Boolean = false, val repeat: Int = Player.REPEAT_MODE_OFF, val queueOrder: List<Int> = emptyList(),
++    val explicitQueue: List<Int> = explicitQueueIndices(queue, queueOrder, currentIndex),
++    val currentArtwork: String = current?.mediaMetadata?.extras?.getString("playerArtwork").orEmpty())
+ 
+ @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+ class LyraViewModel(application: Application) : AndroidViewModel(application) {
+@@ -133,11 +136,16 @@
+ 
+     private fun updatePlayer(rebuildQueue: Boolean = true) {
+         val player = controller ?: return
++        val previous = playback.value
++        val items = if (rebuildQueue) (0 until player.mediaItemCount).map { player.getMediaItemAt(it) } else previous.queue
++        val order = if (rebuildQueue) (if (player.shuffleModeEnabled) shuffleIndices(player) else items.indices.toList()) else previous.queueOrder
++        val pending = if (rebuildQueue || player.currentMediaItemIndex != previous.currentIndex)
++            explicitQueueIndices(items, order, player.currentMediaItemIndex) else previous.explicitQueue
+         playback.value = PlaybackUi(player.isConnected && player.sessionExtras.getBoolean("ready", false), player.currentMediaItem, !Util.shouldShowPlayButton(player),
+             player.currentPosition.coerceAtLeast(0), player.duration.takeIf { it > 0 } ?: player.currentMediaItem?.mediaMetadata?.extras?.getLong("durationMs") ?: 0,
+-            if (rebuildQueue) (0 until player.mediaItemCount).map { player.getMediaItemAt(it) } else playback.value.queue,
++            items,
+             player.currentMediaItemIndex, player.shuffleModeEnabled, player.repeatMode,
+-            if (rebuildQueue) (if (player.shuffleModeEnabled) shuffleIndices(player) else (0 until player.mediaItemCount).toList()) else playback.value.queueOrder)
++            order, pending)
+     }
+ 
+     fun chooseFolder(uri: Uri, resultFlags: Int) {
+--- a/android/app/src/test/java/com/lyra/sona/android/AndroidPersistenceTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/AndroidPersistenceTest.kt
+@@ -18,6 +18,35 @@
+ @RunWith(RobolectricTestRunner::class)
+ @Config(sdk = [35], application = Application::class)
+ class AndroidPersistenceTest {
++    @Test fun upgradeRetainsCachedLibraryAndMarksOldMetadataForOneRescan() = runBlocking {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        val name = "artwork-upgrade-test.db"
++        context.deleteDatabase(name)
++        var db = Room.databaseBuilder(context, LibraryDatabase::class.java, name).build()
++        val song = track(audio("saved"))
++        val folder = Folder(song.folderId, "tree", "root", "Liked Songs", true)
++        db.library().replace("tree", LibrarySnapshot(listOf(song), listOf(folder)))
++        val sqlite = db.openHelper.writableDatabase
++        val create = sqlite.query("SELECT sql FROM sqlite_master WHERE name='tracks'").use { it.moveToFirst(); it.getString(0) }
++        val oldCreate = create.replace("`tracks`", "`old_tracks`").replace(", `metadataVersion` INTEGER NOT NULL DEFAULT 0", "")
++        assertFalse(oldCreate.contains("metadataVersion"))
++        val columns = sqlite.query("PRAGMA table_info(tracks)").use { cursor ->
++            buildList { while (cursor.moveToNext()) if (cursor.getString(1) != "metadataVersion") add("`${cursor.getString(1)}`") }.joinToString(",")
++        }
++        sqlite.execSQL(oldCreate)
++        sqlite.execSQL("INSERT INTO old_tracks ($columns) SELECT $columns FROM tracks")
++        sqlite.execSQL("DROP TABLE tracks")
++        sqlite.execSQL("ALTER TABLE old_tracks RENAME TO tracks")
++        sqlite.execSQL("DELETE FROM room_master_table")
++        sqlite.version = 1
++        db.close()
++        db = Room.databaseBuilder(context, LibraryDatabase::class.java, name).addMigrations(LibraryDatabase.ARTWORK_MIGRATION).build()
++        val restored = db.library().snapshot("tree")
++        assertEquals(song.copy(metadataVersion = 0), restored.tracks.single())
++        assertEquals(folder, restored.folders.single())
++        assertFalse(restored.tracks.single().matches(audio("saved")))
++        db.close(); context.deleteDatabase(name); Unit
++    }
+     @Test fun artworkBudgetAndPruningRetainCurrentCoverAndRemoveOrphans() {
+         val context = ApplicationProvider.getApplicationContext<Application>()
+         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+@@ -39,11 +68,12 @@
+         bitmap.recycle()
+     }
+     @Test fun playbackSnapshotSurvivesSerializationAsPausedRestorationData() {
+-        val saved = PlaybackSnapshot(listOf("a", "b", "a"), 2, 54321, true, 2, listOf(2, 0, 1))
++        val saved = PlaybackSnapshot(listOf("a", "b", "a"), 2, 54321, true, 2, listOf(2, 0, 1), listOf(0, 1))
+         assertEquals(saved, PlaybackSnapshot.decode(saved.encode()))
+         assertEquals(PlaybackSnapshot(), PlaybackSnapshot.decode("broken JSON"))
+         // Playing is deliberately not persisted: service restoration is always paused.
+         assertFalse(saved.encode().contains("playWhenReady"))
++        assertTrue(PlaybackSnapshot.decode("{\"queue\":[\"a\",\"b\"]}").explicitQueue.isEmpty())
+     }
+     @Test fun roomCacheSurvivesDatabaseRecreationAndScopesTrees() = runBlocking {
+         val context = ApplicationProvider.getApplicationContext<Application>()
+--- a/android/app/src/test/java/com/lyra/sona/android/ArtworkReaderTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/ArtworkReaderTest.kt
+@@ -0,0 +1,53 @@
++package com.lyra.sona.android
++
++import android.app.Application
++import android.graphics.Bitmap
++import android.graphics.Color
++import android.graphics.BitmapFactory
++import android.net.Uri
++import androidx.test.core.app.ApplicationProvider
++import com.lyra.sona.android.library.*
++import kotlinx.coroutines.runBlocking
++import org.junit.Assert.*
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++import java.io.ByteArrayOutputStream
++import java.io.File
++import java.nio.ByteBuffer
++
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35], application = Application::class)
++class ArtworkReaderTest {
++    @Test fun media3ReadsEmbeddedFrontCoverWhenPlatformRetrieverHasNoPicture() = runBlocking {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        val bitmap = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
++        val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
++        bitmap.recycle()
++        fun frame(id: String, payload: ByteArray) = id.toByteArray(Charsets.US_ASCII) +
++            ByteBuffer.allocate(4).putInt(payload.size).array() + byteArrayOf(0, 0) + payload
++        val tags = frame("TIT2", byteArrayOf(0) + "Embedded song".toByteArray()) +
++            frame("APIC", byteArrayOf(0) + "image/png".toByteArray() + byteArrayOf(0, 3, 0) + png)
++        val size = byteArrayOf(((tags.size shr 21) and 127).toByte(), ((tags.size shr 14) and 127).toByte(),
++            ((tags.size shr 7) and 127).toByte(), (tags.size and 127).toByte())
++        val file = File(context.cacheDir, "embedded-cover.mp3")
++        // MPEG headers are parsed for metadata only; this test does not decode or play audio.
++        val audioFrame = byteArrayOf(0xff.toByte(), 0xfb.toByte(), 0x90.toByte(), 0x64) + ByteArray(413)
++        file.outputStream().use { stream ->
++            stream.write("ID3".toByteArray()); stream.write(byteArrayOf(3, 0, 0)); stream.write(size); stream.write(tags)
++            repeat(20) { stream.write(audioFrame) }
++        }
++        val entry = DocumentEntry("embedded", file.name, "audio/mpeg", file.length(), 1)
++        val result = AndroidMetadata(context, ArtworkCache(context)).read("tree", "folder", entry, Uri.fromFile(file).toString())
++        assertEquals("Embedded song", result.title)
++        assertTrue("Embedded front cover must be cached", File(result.thumbnail).isFile)
++        assertTrue(File(result.artwork).isFile)
++        assertTrue(result.durationMs > 0)
++        val decoded = BitmapFactory.decodeFile(result.thumbnail)
++        assertTrue(Color.red(decoded.getPixel(12, 12)) > 200)
++        decoded.recycle()
++        file.delete()
++        Unit
++    }
++}
+--- a/android/app/src/test/java/com/lyra/sona/android/LibraryTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/LibraryTest.kt
+@@ -25,6 +25,37 @@
+         entry.name.substringBeforeLast('.'), durationMs = 1000, metadataError = error)
+ 
+ class LibraryTest {
++    @Test fun oldArtworkMetadataIsReadOnceAfterUpgrade() = runTest {
++        val entry = audio("song")
++        val source = FakeDocuments(mapOf("root" to listOf(entry)))
++        val engine = ScanEngine(source, MetadataSource { tree, folder, file, _ -> track(file, tree, folder) })
++        val first = engine.scan("tree", listOf(track(entry).copy(metadataVersion = 0)))
++        assertEquals(1, first.metrics.metadataReads)
++        assertEquals(0, engine.scan("tree", first.snapshot.tracks).metrics.metadataReads)
++    }
++    @Test fun unreadablePreferredCoverFallsBackToNextImage() = runTest {
++        val source = object : DocumentSource by FakeDocuments(mapOf("root" to listOf(audio("song"),
++            DocumentEntry("bad", "cover.jpg", "image/jpeg", 1, 1), DocumentEntry("good", "folder.png", "image/png", 1, 1)))) {
++            override suspend fun cover(tree: String, entry: DocumentEntry) = if (entry.documentId == "bad") "" else "good-cover"
++        }
++        val result = ScanEngine(source, MetadataSource { tree, folder, file, _ -> track(file, tree, folder) }).scan("tree", emptyList())
++        assertEquals("good-cover", result.snapshot.folders.single().thumbnail)
++        assertEquals("good-cover", resolveLibraryArtwork(result.snapshot.tracks, result.snapshot.folders).single().artwork)
++        assertEquals("", result.snapshot.tracks.single().artwork)
++    }
++    @Test fun embeddedTrackCoverBecomesFolderThumbnailWithoutOverwritingOtherTrackArt() = runTest {
++        val source = FakeDocuments(mapOf("root" to listOf(audio("a"), audio("b"))))
++        val result = ScanEngine(source, MetadataSource { tree, folder, file, _ ->
++            track(file, tree, folder).copy(thumbnail = "small-${file.documentId}", artwork = "large-${file.documentId}")
++        }).scan("tree", emptyList())
++        assertEquals("small-a", result.snapshot.folders.single().thumbnail)
++        assertEquals(listOf("large-a", "large-b"), resolveLibraryArtwork(result.snapshot.tracks, result.snapshot.folders).map { it.artwork })
++    }
++    @Test fun artworkRecognizesImageMimeAndUppercaseExtensions() {
++        assertTrue(DocumentEntry("art", "Cover.JPG", "application/octet-stream", 1, 1).isImage)
++        assertTrue(DocumentEntry("art", "Artwork", "image/jpeg", 1, 1).isImage)
++        assertFalse(DocumentEntry("folder", "cover.jpg", DIRECTORY_MIME, null, null).isImage)
++    }
+     @Test fun unknownModificationTimeAndEvictedArtworkRequireRevalidation() {
+         val unknownTime = DocumentEntry("song", "song.mp3", "audio/mpeg", 100, null)
+         assertFalse(track(unknownTime).matches(unknownTime))
+--- a/android/app/src/test/java/com/lyra/sona/android/Media3QueueTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/Media3QueueTest.kt
+@@ -17,6 +17,24 @@
+ @Config(sdk = [35], application = Application::class)
+ @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+ class Media3QueueTest {
++    @Test fun playlistPlaybackHasNoExplicitQueueAndDuplicateManualAddsRemainSeparate() {
++        val a = track(audio("a")); val b = track(audio("b"))
++        val items = listOf(a.mediaItem(), b.mediaItem(), a.mediaItem().withQueueFlag(true), a.mediaItem().withQueueFlag(true))
++        assertTrue(explicitQueueIndices(items.take(2), listOf(0, 1), 0).isEmpty())
++        assertEquals(listOf(3, 2), explicitQueueIndices(items, listOf(0, 3, 1, 2), 0))
++        assertEquals(listOf(2), explicitQueueIndices(items, listOf(0, 3, 1, 2), 3))
++    }
++    @Test fun metadataRefreshRetainsExplicitQueueFlags() {
++        val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
++        val song = track(audio("song"))
++        try {
++            player.setMediaItems(listOf(song.mediaItem(), song.mediaItem().withQueueFlag(true)))
++            reconcilePlayer(player, mapOf(song.id to song.copy(title = "Updated", artwork = "cover")))
++            assertFalse(player.getMediaItemAt(0).isExplicitlyQueued())
++            assertTrue(player.getMediaItemAt(1).isExplicitlyQueued())
++            assertEquals(listOf(1), explicitQueueIndices((0..1).map { player.getMediaItemAt(it) }, listOf(0, 1), 0))
++        } finally { player.release() }
++    }
+     @Test fun shuffledQueueAppendAndMovePreserveDuplicateOccurrencesAndCurrentSource() {
+         val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
+         fun item(id: String) = MediaItem.Builder().setMediaId(id).setUri("content://test/$id").build()
+--- a/android/app/src/test/java/com/lyra/sona/android/OnboardingUiTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/OnboardingUiTest.kt
+@@ -5,6 +5,9 @@
+ import com.lyra.sona.android.library.FOLDER_HINT
+ import com.lyra.sona.android.ui.LyraApp
+ import com.lyra.sona.android.ui.LyraViewModel
++import com.lyra.sona.android.ui.PlaybackUi
++import com.lyra.sona.android.playback.mediaItem
++import com.lyra.sona.android.playback.withQueueFlag
+ import androidx.test.core.app.ApplicationProvider
+ import org.junit.Rule
+ import org.junit.Test
+@@ -47,4 +50,24 @@
+         compose.onNodeWithContentDescription("Dismiss message").performClick()
+         compose.onNodeWithText("Android rejected access. Your previous library has not changed.").assertDoesNotExist()
+     }
++    @Test fun playerHidesPlaylistQueueAndVolumeHintButShowsExplicitAdds() {
++        val model = LyraViewModel(ApplicationProvider.getApplicationContext<LyraApplication>())
++        model.setUiActive(false)
++        val song = track(audio("song")).copy(title = "Queue UI song").mediaItem()
++        val state = PlaybackUi(ready = true, current = song, duration = 1000, queue = listOf(song, song), currentIndex = 0)
++        model.playback.value = state
++        compose.setContent { LyraApp(model) {} }
++        compose.onNodeWithText("Queue UI song").performClick()
++        compose.onNodeWithText("NOW PLAYING").assertExists()
++        compose.onNodeWithText("Queue · 2").assertDoesNotExist()
++        compose.onNodeWithText("Queue · 0").assertDoesNotExist()
++        compose.onNodeWithText("Use your phone’s volume buttons to adjust sound.").assertDoesNotExist()
++        compose.runOnIdle { model.playback.value = state.copy(queue = listOf(song, song.withQueueFlag(true)), explicitQueue = listOf(1)) }
++        compose.onNode(hasScrollAction()).performScrollToIndex(2)
++        compose.onNodeWithText("Queue · 1").performScrollTo().performClick()
++        compose.onNodeWithText("Your queue · 1").assertExists()
++        compose.runOnIdle { model.playback.value = state }
++        compose.onNodeWithText("Your queue · 1").assertDoesNotExist()
++        compose.onNodeWithText("NOW PLAYING").assertExists()
++    }
+ }
+--- a/android/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
+@@ -14,6 +14,7 @@
+ import com.lyra.sona.android.ui.LyraViewModel
+ import com.lyra.sona.android.playback.QueueCommands
+ import com.lyra.sona.android.playback.shuffleIndices
++import com.lyra.sona.android.playback.isExplicitlyQueued
+ import androidx.media3.exoplayer.source.ShuffleOrder
+ import androidx.test.core.app.ApplicationProvider
+ import com.lyra.sona.android.library.*
+@@ -85,6 +86,7 @@
+             awaitCondition("Play request must reach ExoPlayer") { player(service).mediaItemCount == 1 && player(service).playWhenReady }
+             assertEquals(song.id, player(service).currentMediaItem?.mediaId)
+             assertEquals(song.uri, player(service).currentMediaItem?.localConfiguration?.uri.toString())
++            assertTrue(model.playback.value.explicitQueue.isEmpty())
+         } finally {
+             store.clear(); MediaController.releaseFuture(future); service.onDestroy()
+         }
+@@ -121,6 +123,11 @@
+             assertEquals(listOf(0, 1, 2, 4, 3), shuffleIndices(player))
+             assertEquals(next.id, player.getMediaItemAt(player.nextMediaItemIndex).mediaId)
+             assertEquals(1200L, player.currentPosition)
++            assertTrue(com.lyra.sona.android.playback.explicitQueueIndices((0 until player.mediaItemCount).map { player.getMediaItemAt(it) }, shuffleIndices(player), player.currentMediaItemIndex).size == 2)
++            player.seekToNextMediaItem()
++            shadowOf(Looper.getMainLooper()).idle()
++            assertFalse(player.currentMediaItem!!.isExplicitlyQueued())
++            assertEquals(1, com.lyra.sona.android.playback.explicitQueueIndices((0 until player.mediaItemCount).map { player.getMediaItemAt(it) }, shuffleIndices(player), player.currentMediaItemIndex).size)
+         } finally { service.onDestroy(); Dispatchers.resetMain() }
+     }
+ 
+--- a/android/app/src/test/java/com/lyra/sona/android/PlayerControlsTest.kt
++++ b/android/app/src/test/java/com/lyra/sona/android/PlayerControlsTest.kt
+@@ -36,7 +36,7 @@
+         override fun getState() = state
+         override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+             actions += "seek"
+-            state = state.buildUpon().setContentPositionMs(0).setPlaybackState(Player.STATE_READY).build()
++            state = state.buildUpon().setContentPositionMs(positionMs.coerceAtLeast(0)).setPlaybackState(Player.STATE_READY).build()
+             return Futures.immediateVoidFuture()
+         }
+         override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+@@ -70,6 +70,10 @@
+             assertTrue(player.actions.contains("seek"))
+             assertFalse(player.actions.contains("pause"))
+             assertEquals(0L, player.currentPosition)
++            model.seek(750)
++            shadowOf(Looper.getMainLooper()).idle()
++            assertEquals(750L, player.currentPosition)
++            assertEquals(750L, model.playback.value.position)
+         } finally { store.clear(); MediaController.releaseFuture(future); session.release(); player.release() }
+     }
+ }
+--- a/android/PHONE_TEST_CHECKLIST.md
++++ b/android/PHONE_TEST_CHECKLIST.md
+@@ -25,10 +25,19 @@
+ - [ ] Navigation, Android Back/predictive Back, search keyboard, and mini-player synchronization work.
+ - [ ] Rotate during playback/search/queue use; playback continues and screen state remains sensible.
+ - [ ] Small/large displays, large font scaling, TalkBack labels, 48dp touch controls, and long titles are usable.
+-- [ ] Edge-to-edge controls respect status/navigation bars and keyboard insets, including Android 16.
++- [ ] Fullscreen hides status/navigation bars (both gesture and three-button navigation); edge swipes reveal temporary controls. Return from picker, Settings, lock screen, dialogs, and rotation: fullscreen is restored. Keyboard/cutout insets remain usable.
+ - [ ] Inspect app permissions: no Internet or broad storage permission; music files are unchanged.
+ 
+ ## Report results
++
++Version 1.0.3 checks:
++
++- [ ] Update over 1.0.2 without losing the selected folder, tracks, or restored playback. Allow the one-time artwork rescan to finish.
++- [ ] Verify embedded front covers in MP3/FLAC/M4A/Ogg/Opus, track rows, mini-player, Now Playing, and folder thumbnails. Folder cover images fill missing track art; corrupt cover.jpg falls back to another readable image.
++- [ ] Seek forward and backward repeatedly on internal storage and SD cards, paused and playing; confirm the position responds and audio resumes promptly. Record any slow files/providers and format.
++- [ ] Playing a playlist shows no queue button. Add duplicates with Play next/Add to queue: only explicit pending additions appear, in shuffle traversal order. Starting an addition removes it from the pending queue; consuming/removing the last addition hides queue information.
++- [ ] Reorder/remove manual additions and restart the app; duplicate occurrences and explicit queue flags survive. Old saved playlist sessions restore without an explicit queue.
++- [ ] No volume-button hint is visible in Now Playing.
+ 
+ Version 1.0.2 playback fix to check on a phone:
+ 
+--- a/android/README.md
++++ b/android/README.md
+@@ -6,7 +6,7 @@
+ 
+ ## Install
+ 
+-Copy `delivery/Lyra-Android-1.0.2-debug.apk` to your phone and open it. It updates the earlier debug build in place. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
++Copy `delivery/Lyra-Android-1.0.3-debug.apk` to your phone and open it. It updates the earlier debug build in place. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
+ 
+ On first run, choose `Music` or an allowed subfolder. Android 11+ blocks choosing the internal storage root, certain SD-card roots, and the main `Download` folder. If **Use this folder** is greyed out, enter an allowed subfolder. Lyra explains this before opening the picker. Cancelling leaves the guidance or previous library visible. Rejected selections and failed grants show a recovery action and preserve the previous library.
+ 
+@@ -14,7 +14,11 @@
+ 
+ Tap a track to play its collection. Track menus provide **Play next** and **Add to queue**. Tap the mini-player to open Now Playing; open Queue there to remove/reorder tracks. Use system volume buttons. Restored sessions start paused. Sudden process death can lose up to two seconds since the last position checkpoint. Seeking and queue/mode changes save immediately.
+ 
+-Queue displays the actual playback order, including shuffle. Play next inserts immediately after the current queue occurrence; Add to queue appends to the playback order. Moving a shuffled item changes the shuffle traversal while preserving the current source. Turning shuffle off restores the underlying playlist order.
++Queue displays only occurrences explicitly added with Play next or Add to queue, in playback order including shuffle. Playing a playlist creates no explicit queue. The queue button disappears when there are no pending explicit additions; an addition leaves the queue when it starts playing. Play next inserts immediately after the current occurrence; Add to queue appends to the playback order. Moving a shuffled item changes the shuffle traversal while preserving the current source. Turning shuffle off restores the underlying playlist order.
++
++Lyra hides Android's status and navigation bars while the Activity is foreground. An edge swipe can reveal transient system controls, which Android hides again. Fullscreen is reapplied after returning from the folder picker or Settings.
++
++Embedded covers use the platform metadata reader with a Media3 fallback for formats/tags the platform misses. Folder cover images also appear on tracks without embedded or album artwork; a track's embedded cover supplies the playlist thumbnail when no folder image exists. Failed preferred folder images fall through to the next readable image. Updating from 1.0.2 keeps the selected library and rescans old metadata once. Local playback uses a 150 ms seek/start buffering threshold and a 30-second back buffer.
+ 
+ When a storage provider reports a loading or failed listing, Lyra preserves the previous library and asks you to refresh after storage is ready. Files with unknown size/modification time are re-read on refresh. Successful folder switches discard old folder caches and release unused grants. Artwork has a 64 MiB eviction budget, with the current cover and just-written image pair protected; deleted covers are collected after library publication. Evicted artwork can be regenerated on refresh.
+ 
+@@ -52,7 +56,7 @@
+ 
+ ## Verification and performance
+ 
+-See `verification/PLAYBACK_FIX_2026-10-04.md` for the version 1.0.2 playback regression fix, `verification/FIXES_2026-10-04.md` for version 1.0.1 fixes and checks, `verification/REPORT.md` for historical version 1.0.0 verification, and `PHONE_TEST_CHECKLIST.md` for phone checks. Build success and host tests do **not** verify Android audio playback.
++See `verification/UI_ARTWORK_FIXES_2026-10-04.md` for version 1.0.3 artwork, fullscreen, seek, and queue fixes, `verification/PLAYBACK_FIX_2026-10-04.md` for the version 1.0.2 playback regression fix, `verification/FIXES_2026-10-04.md` for version 1.0.1 fixes and checks, `verification/REPORT.md` for historical version 1.0.0 verification, and `PHONE_TEST_CHECKLIST.md` for phone checks. Build success and host tests do **not** verify Android audio playback.
+ 
+ The synthetic 5,000-track host benchmark uses the production scan orchestrator with fake document listings, fake metadata, and an in-memory cache. Its cache-ready time is not Room startup or Android second-launch time. Run only that benchmark with:
+ 

@@ -1,0 +1,1443 @@
+--- 1.0.0/app/build.gradle.kts
++++ 1.0.1/app/build.gradle.kts
+@@ -11,8 +11,8 @@
+         applicationId = "com.lyra.sona.android"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 1
+-        versionName = "1.0.0"
++        versionCode = 2
++        versionName = "1.0.1"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+     buildFeatures { compose = true; buildConfig = true }
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/library/AndroidDocuments.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/library/AndroidDocuments.kt
+@@ -6,25 +6,47 @@
+ import android.media.MediaMetadataRetriever
+ import android.net.Uri
+ import android.provider.DocumentsContract
++import android.database.Cursor
++import android.os.CancellationSignal
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.currentCoroutineContext
+ import kotlinx.coroutines.ensureActive
+ import kotlinx.coroutines.withContext
++import kotlinx.coroutines.suspendCancellableCoroutine
+ import kotlinx.coroutines.sync.Semaphore
+ import kotlinx.coroutines.sync.withPermit
+ import java.io.File
++import kotlin.coroutines.resumeWithException
+ 
+ class AndroidDocuments(private val context: Context, private val artwork: ArtworkCache) : DocumentSource {
+     private val resolver = context.contentResolver
+     override fun rootId(tree: String): String = DocumentsContract.getTreeDocumentId(Uri.parse(tree))
+     override fun uri(tree: String, documentId: String): String = DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree), documentId).toString()
+ 
++    private suspend fun query(uri: Uri, columns: Array<String>): Cursor? = suspendCancellableCoroutine { continuation ->
++        val signal = CancellationSignal()
++        continuation.invokeOnCancellation { signal.cancel() }
++        try {
++            val cursor = resolver.query(uri, columns, null, null, null, signal)
++            continuation.resume(cursor) { _, unused, _ -> unused?.close() }
++        } catch (error: Exception) { continuation.resumeWithException(error) }
++    }
++
++    private fun requireComplete(cursor: Cursor) {
++        val message = cursor.extras.getString(DocumentsContract.EXTRA_ERROR).orEmpty()
++        check(message.isBlank()) { "The storage provider reported an error: $message" }
++        check(!cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING, false)) {
++            "The storage provider is still loading this folder. Wait for it to finish, then refresh."
++        }
++    }
++
+     override suspend fun validate(tree: String): String = withContext(Dispatchers.IO) {
+         require(DocumentsContract.isTreeUri(Uri.parse(tree))) { "Choose a music folder, rather than an individual file." }
+         require(resolver.persistedUriPermissions.any { it.uri.toString() == tree && it.isReadPermission }) {
+             "Android did not retain access to this folder. Choose another folder such as Music or a subfolder."
+         }
+-        resolver.query(Uri.parse(uri(tree, rootId(tree))), arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE), null, null, null)?.use {
++        query(Uri.parse(uri(tree, rootId(tree))), arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE))?.use {
++            requireComplete(it)
+             require(it.moveToFirst() && it.getString(1) == DIRECTORY_MIME) { "This folder is unavailable. Choose another folder." }
+             val name = it.getString(0).orEmpty()
+             children(tree, rootId(tree)) // Confirm that the provider actually permits enumeration.
+@@ -38,39 +60,89 @@
+         val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+             DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+         val entries = mutableListOf<DocumentEntry>()
+-        resolver.query(childUri, columns, null, null, null)?.use { cursor ->
++        query(childUri, columns)?.use { cursor ->
++            requireComplete(cursor)
+             while (cursor.moveToNext()) {
+                 currentCoroutineContext().ensureActive()
+                 entries += DocumentEntry(cursor.getString(0), cursor.getString(1).orEmpty(), cursor.getString(2),
+                     if (cursor.isNull(3)) null else cursor.getLong(3), if (cursor.isNull(4)) null else cursor.getLong(4))
+             }
++            requireComplete(cursor)
+         } ?: error("Could not read a music folder. Reconnect storage or choose another folder.")
+         entries
+     }
+ 
+     override suspend fun cover(tree: String, entry: DocumentEntry): String = withContext(Dispatchers.IO) {
+         val key = stableId(tree, "${entry.documentId}:${entry.size}:${entry.modified}")
+-        artwork.thumbnail(key).takeIf { it.isFile }?.absolutePath ?: run {
+-            resolver.openInputStream(Uri.parse(uri(tree, entry.documentId)))?.use {
+-                val output = java.io.ByteArrayOutputStream()
+-                val buffer = ByteArray(8192)
+-                while (output.size() <= 16 * 1024 * 1024) {
+-                    val count = it.read(buffer, 0, minOf(buffer.size, 16 * 1024 * 1024 + 1 - output.size()))
+-                    if (count < 0) break
+-                    output.write(buffer, 0, count)
+-                }
+-                val bytes = output.toByteArray()
+-                if (bytes.size > 16 * 1024 * 1024) "" else artwork.save(key, bytes).first
++        artwork.thumbnail(key).takeIf { entry.size != null && entry.modified != null && entry.modified > 0 && it.isFile }?.absolutePath ?: run {
++            readCoverBytes(Uri.parse(uri(tree, entry.documentId)))?.let { bytes ->
++                if (bytes.size > 16 * 1024 * 1024) return@let ""
++                val reliable = entry.size != null && entry.modified != null && entry.modified > 0
++                val contentKey = if (reliable) key else stableId(tree, entry.documentId + ":" +
++                    java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) })
++                artwork.save(contentKey, bytes).first
+             }.orEmpty()
+         }
+     }
++
++    private suspend fun readCoverBytes(uri: Uri): ByteArray? = suspendCancellableCoroutine { continuation ->
++        val signal = CancellationSignal()
++        val activeStream = java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>()
++        continuation.invokeOnCancellation {
++            signal.cancel()
++            runCatching { activeStream.get()?.close() }
++        }
++        try {
++            val bytes = resolver.openAssetFileDescriptor(uri, "r", signal)?.use { descriptor ->
++                descriptor.createInputStream().use { stream ->
++                    activeStream.set(stream)
++                    val output = java.io.ByteArrayOutputStream()
++                    val buffer = ByteArray(8192)
++                    while (output.size() <= 16 * 1024 * 1024) {
++                        if (!continuation.isActive) throw kotlinx.coroutines.CancellationException("Cover read cancelled")
++                        val count = stream.read(buffer, 0, minOf(buffer.size, 16 * 1024 * 1024 + 1 - output.size()))
++                        if (count < 0) break
++                        output.write(buffer, 0, count)
++                    }
++                    output.toByteArray()
++                }
++            }
++            continuation.resume(bytes) { _, _, _ -> }
++        } catch (error: Exception) { continuation.resumeWithException(error) }
++        finally { activeStream.set(null) }
++    }
+ }
+ 
+-class ArtworkCache(context: Context) {
++class ArtworkCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024) {
+     private val directory = File(context.filesDir, "artwork").apply { mkdirs() }
+-    private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
++    // A single bounded lock also excludes eviction while a pair of images is being written.
++    private val lock = Any()
++    @Volatile private var playingPaths: Set<String> = emptySet()
++    fun protectCurrent(paths: Set<String>) { playingPaths = paths }
+     fun thumbnail(key: String) = File(directory, "$key-small.jpg")
+-    fun save(key: String, bytes: ByteArray): Pair<String, String> = synchronized(locks.computeIfAbsent(key) { Any() }) { saveLocked(key, bytes) }
++    fun save(key: String, bytes: ByteArray): Pair<String, String> = synchronized(lock) {
++        saveLocked(key, bytes).also { paths ->
++            listOf(paths.first, paths.second).filter { it.isNotEmpty() }.forEach { File(it).setLastModified(System.currentTimeMillis()) }
++            trimLocked(playingPaths + listOf(paths.first, paths.second))
++        }
++    }
++    fun prune(referencedPaths: Set<String>, canPrune: () -> Boolean = { true }) = synchronized(lock) {
++        if (!canPrune()) return@synchronized
++        val retained = referencedPaths + playingPaths
++        directory.listFiles().orEmpty().filter { it.isFile && it.absolutePath !in retained }.forEach { it.delete() }
++        trimLocked(playingPaths)
++    }
++    private fun trimLocked(protectedPaths: Set<String>) {
++        val files = directory.listFiles().orEmpty().filter { it.isFile }
++        var total = files.sumOf { it.length() }
++        for (file in files.sortedBy { it.lastModified() }) {
++            if (total <= maxBytes) break
++            if (file.absolutePath !in protectedPaths) {
++                val size = file.length()
++                if (file.delete()) total -= size
++            }
++        }
++    }
+     private fun saveLocked(key: String, bytes: ByteArray): Pair<String, String> {
+         if (bytes.size > 16 * 1024 * 1024) return "" to ""
+         val small = thumbnail(key)
+@@ -103,7 +175,8 @@
+         try {
+             reader.setDataSource(context, Uri.parse(uri))
+             fun value(key: Int) = reader.extractMetadata(key).orEmpty().trim()
+-            val art = reader.embeddedPicture?.let { bytes ->
++            val art = reader.embeddedPicture?.takeIf { it.size <= 16 * 1024 * 1024 }?.let { bytes ->
++                currentCoroutineContext().ensureActive()
+                 // A shared album cover is decoded once even when embedded in hundreds of files.
+                 val contentKey = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                 artwork.save("embedded-$contentKey", bytes)
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/library/LibraryDatabase.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/library/LibraryDatabase.kt
+@@ -17,12 +17,16 @@
+     @Query("SELECT * FROM folders WHERE tree = :tree") abstract suspend fun folders(tree: String): List<Folder>
+     @Query("DELETE FROM tracks WHERE tree = :tree") abstract suspend fun clearTracks(tree: String)
+     @Query("DELETE FROM folders WHERE tree = :tree") abstract suspend fun clearFolders(tree: String)
++    @Query("DELETE FROM tracks WHERE tree != :tree") abstract suspend fun clearOtherTracks(tree: String)
++    @Query("DELETE FROM folders WHERE tree != :tree") abstract suspend fun clearOtherFolders(tree: String)
+     @Insert(onConflict = OnConflictStrategy.REPLACE) abstract suspend fun insertTracks(tracks: List<Track>)
+     @Insert(onConflict = OnConflictStrategy.REPLACE) abstract suspend fun insertFolders(folders: List<Folder>)
+     @Transaction open suspend fun replace(tree: String, snapshot: LibrarySnapshot) {
+         clearTracks(tree); clearFolders(tree)
+         insertTracks(snapshot.tracks); insertFolders(snapshot.folders)
+     }
++    @Transaction open suspend fun snapshot(tree: String) = LibrarySnapshot(tracks(tree), folders(tree), tree, loaded = true)
++    @Transaction open suspend fun retainTree(tree: String) { clearOtherTracks(tree); clearOtherFolders(tree) }
+ }
+ 
+ @Database(entities = [Track::class, Folder::class], version = 1, exportSchema = false)
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/library/LibraryModels.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/library/LibraryModels.kt
+@@ -37,7 +37,9 @@
+     val artwork: String = "",
+     val metadataError: String = "",
+ ) {
+-    fun matches(entry: DocumentEntry) = metadataError.isEmpty() && size == entry.size && modified == entry.modified && fileName == entry.name
++    fun matches(entry: DocumentEntry) = metadataError.isEmpty() && entry.size != null && entry.modified != null &&
++        entry.modified > 0 && size == entry.size && modified == entry.modified && fileName == entry.name &&
++        (thumbnail.isEmpty() || java.io.File(thumbnail).isFile) && (artwork.isEmpty() || java.io.File(artwork).isFile)
+     fun matchesSearch(query: String): Boolean = listOf(title, artist, album, albumArtist, year, genre, fileName)
+         .any { it.contains(query, ignoreCase = true) }
+ }
+@@ -45,7 +47,8 @@
+ @Entity(tableName = "folders")
+ data class Folder(@PrimaryKey val id: String, val tree: String, val documentId: String, val name: String, val isRoot: Boolean, val thumbnail: String = "")
+ 
+-data class LibrarySnapshot(val tracks: List<Track> = emptyList(), val folders: List<Folder> = emptyList())
++data class LibrarySnapshot(val tracks: List<Track> = emptyList(), val folders: List<Folder> = emptyList(),
++    val tree: String = "", val loaded: Boolean = false)
+ data class ScanProgress(val label: String = "", val processed: Int = 0, val total: Int = 0, val running: Boolean = false)
+ data class ScanMetrics(val discovered: Int, val metadataReads: Int, val reused: Int, val elapsedMs: Long)
+ data class ScanResult(val snapshot: LibrarySnapshot, val metrics: ScanMetrics)
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/library/LibraryRepository.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/library/LibraryRepository.kt
+@@ -6,6 +6,7 @@
+ import kotlinx.coroutines.CoroutineDispatcher
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
++import kotlinx.coroutines.NonCancellable
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.SharingStarted
+ import kotlinx.coroutines.flow.StateFlow
+@@ -23,9 +24,11 @@
+ class LibraryRepository(private val dao: LibraryDao, val preferences: AppPreferences, private val source: DocumentSource,
+     private val engine: ScanEngine, private val scope: CoroutineScope, private val workerDispatcher: CoroutineDispatcher = Dispatchers.IO) {
+     val tree = preferences.tree.stateIn(scope, SharingStarted.Eagerly, "")
+-    val snapshot: StateFlow<LibrarySnapshot> = combine(dao.observeTracks(), dao.observeFolders(), preferences.tree) { tracks, folders, selected ->
+-        LibrarySnapshot(resolveAlbumArtwork(tracks.filter { it.tree == selected }).sortedWith(trackComparator),
+-            folders.filter { it.tree == selected }.sortedWith { a, b -> if (a.isRoot != b.isRoot) if (a.isRoot) -1 else 1 else naturalCompare(a.name, b.name) })
++    val snapshot: StateFlow<LibrarySnapshot> = combine(dao.observeTracks(), dao.observeFolders(), preferences.tree) { _, _, selected ->
++        // Flow notifications can arrive separately even after one Room commit. Read both tables together.
++        val cached = dao.snapshot(selected)
++        cached.copy(tracks = resolveAlbumArtwork(cached.tracks).sortedWith(trackComparator),
++            folders = cached.folders.sortedWith { a, b -> if (a.isRoot != b.isRoot) if (a.isRoot) -1 else 1 else naturalCompare(a.name, b.name) })
+     }.stateIn(scope, SharingStarted.Eagerly, LibrarySnapshot())
+     val progress = MutableStateFlow(ScanProgress())
+     val error = MutableStateFlow("")
+@@ -49,8 +52,12 @@
+                 currentCoroutineContext().ensureActive()
+                 if (ticket != generation) throw CancellationException("New folder scan superseded")
+                 // Keep the previous selection visible until the whole new tree has been read.
+-                dao.replace(tree, result.snapshot)
+-                preferences.selectTree(tree)
++                withContext(NonCancellable) {
++                    dao.replace(tree, result.snapshot)
++                    preferences.selectTree(tree)
++                    // Cleanup must not turn a committed selection into a reported selection failure.
++                    runCatching { dao.retainTree(tree) }
++                }
+                 metrics.value = result.metrics
+                 progress.value = ScanProgress("${result.metrics.discovered} tracks · ${result.metrics.reused} cached", result.metrics.discovered, result.metrics.discovered)
+             }
+@@ -73,6 +80,7 @@
+                 publication.withLock {
+                     if (ticket == generation && preferences.tree.first() == selected) {
+                         dao.replace(selected, result.snapshot)
++                        dao.retainTree(selected)
+                         metrics.value = result.metrics
+                         progress.value = ScanProgress("${result.metrics.discovered} tracks · ${result.metrics.reused} cached", result.metrics.discovered, result.metrics.discovered)
+                     }
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/LyraApplication.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/LyraApplication.kt
+@@ -9,6 +9,8 @@
+ import kotlinx.coroutines.SupervisorJob
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.withContext
+ 
+ class LyraApplication : Application() {
+     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+@@ -26,5 +28,16 @@
+         scope.launch {
+             library.metrics.collect { it?.let { metrics -> performance.scanned(metrics.discovered, metrics.elapsedMs, metrics.metadataReads, metrics.reused) } }
+         }
++        scope.launch {
++            combine(library.snapshot, library.progress) { snapshot, progress -> snapshot.takeIf { it.loaded && !progress.running } }
++                .collect { snapshot ->
++                    if (snapshot != null) withContext(Dispatchers.IO) {
++                        val paths = snapshot.tracks.flatMap { listOf(it.thumbnail, it.artwork) } + snapshot.folders.map { it.thumbnail }
++                        artwork.prune(paths.filter { it.isNotEmpty() }.toSet()) {
++                            !library.progress.value.running && library.snapshot.value == snapshot
++                        }
++                    }
++                }
++        }
+     }
+ }
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/MainActivity.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/MainActivity.kt
+@@ -31,5 +31,6 @@
+             }
+         }
+     }
+-    override fun onStart() { super.onStart(); model.refresh() }
++    override fun onStart() { super.onStart(); model.setUiActive(true); model.refresh() }
++    override fun onStop() { model.setUiActive(false); super.onStop() }
+ }
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
+@@ -15,6 +15,11 @@
+ import androidx.media3.exoplayer.source.ShuffleOrder
+ import androidx.media3.session.MediaSession
+ import androidx.media3.session.MediaSessionService
++import androidx.media3.session.SessionCommand
++import androidx.media3.session.SessionResult
++import androidx.media3.session.SessionError
++import com.google.common.util.concurrent.Futures
++import com.google.common.util.concurrent.ListenableFuture
+ import com.lyra.sona.android.LyraApplication
+ import com.lyra.sona.android.MainActivity
+ import com.lyra.sona.android.data.PlaybackSnapshot
+@@ -22,10 +27,13 @@
+ import com.lyra.sona.android.library.resolveAlbumArtwork
+ import kotlinx.coroutines.*
+ import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.combine
+ import java.io.File
+ 
+ fun Track.mediaItem(): MediaItem = MediaItem.Builder().setMediaId(id).setUri(uri)
+     .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
++        .setDurationMs(durationMs.takeIf { it > 0 })
+         .setAlbumArtist(albumArtist).setTrackNumber(trackNumber.takeIf { it > 0 })
+         .setArtworkUri(thumbnail.takeIf { it.isNotEmpty() }?.let { Uri.fromFile(File(it)) })
+         .setExtras(Bundle().apply { putString("playerArtwork", artwork); putLong("durationMs", durationMs) }).build()).build()
+@@ -37,7 +45,7 @@
+     private var session: MediaSession? = null
+     private lateinit var graph: LyraApplication
+     private val failurePolicy = FailurePolicy()
+-    private var restoring = true
++    private val restoring = MutableStateFlow(true)
+     private var saveJob: Job? = null
+     private var successJob: Job? = null
+ 
+@@ -50,7 +58,8 @@
+             setWakeMode(C.WAKE_MODE_LOCAL)
+             addListener(object : Player.Listener {
+                 override fun onEvents(player: Player, events: Player.Events) {
+-                    if (!restoring && (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
++                    protectArtwork()
++                    if (!restoring.value && (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                             events.contains(Player.EVENT_POSITION_DISCONTINUITY) || events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED) ||
+                             events.contains(Player.EVENT_REPEAT_MODE_CHANGED) || events.contains(Player.EVENT_IS_PLAYING_CHANGED))) save()
+                 }
+@@ -74,8 +83,33 @@
+         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+         session = MediaSession.Builder(this, player).setSessionActivity(activity).setSessionExtras(Bundle().apply { putBoolean("ready", false) }).setCallback(object : MediaSession.Callback {
+             override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+-                return if (controller.packageName == packageName || controller.isTrusted) super.onConnect(session, controller)
+-                else MediaSession.ConnectionResult.reject()
++                val own = controller.packageName == packageName && controller.isPackageNameVerified
++                if (!own && !controller.isTrusted) return MediaSession.ConnectionResult.reject()
++                val base = super.onConnect(session, controller)
++                val commands = base.availableSessionCommands.buildUpon()
++                if (own) { commands.add(QueueCommands.enqueue); commands.add(QueueCommands.move) }
++                return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
++                    .setAvailablePlayerCommands(base.availablePlayerCommands)
++                    .setAvailableSessionCommands(commands.build()).build()
++            }
++            override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo,
++                customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
++                if (controller.packageName != packageName || !controller.isPackageNameVerified) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
++                if (restoring.value) return Futures.immediateFuture(SessionResult(SessionError.ERROR_INVALID_STATE))
++                when (customCommand) {
++                    QueueCommands.enqueue -> {
++                        val library = graph.library.snapshot.value
++                        if (!library.loaded) return Futures.immediateFuture(SessionResult(SessionError.ERROR_INVALID_STATE))
++                        val available = library.tracks.associateBy { it.id }
++                        val ids = args.getStringArrayList("ids").orEmpty()
++                        if (ids.any { it !in available }) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
++                        enqueueItems(player, ids.map { available.getValue(it).mediaItem() }, args.getBoolean("next"))
++                    }
++                    QueueCommands.move -> moveQueuedItem(player, args.getInt("from", -1), args.getInt("to", -1))
++                    else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
++                }
++                save()
++                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+             }
+         }).build()
+         serviceScope.launch {
+@@ -92,52 +126,36 @@
+                     player.prepare()
+                     player.playWhenReady = false
+                 }
+-            } catch (error: Exception) { graph.playbackMessage.value = "Playback restoration failed: ${error.message}" }
+-            finally { restoring = false; session?.setSessionExtras(Bundle().apply { putBoolean("ready", true) }) }
++            } catch (cancelled: CancellationException) { throw cancelled }
++            catch (error: Exception) { graph.playbackMessage.value = "Playback restoration failed: ${error.message}" }
++            finally { restoring.value = false; session?.setSessionExtras(Bundle().apply { putBoolean("ready", true) }) }
+             while (isActive) { delay(2000); if (player.isPlaying) save() }
+         }
+         serviceScope.launch {
+-            var first = true
+-            graph.library.snapshot.collect { library ->
+-                // The first StateFlow value is intentionally empty while Room loads.
+-                if (first) { first = false; return@collect }
+-                if (restoring || graph.library.progress.value.running || library.folders.isEmpty()) return@collect
+-                val available = library.tracks.associateBy { it.id }
+-                val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
+-                val result = reconcileQueue(queue, player.currentMediaItemIndex, player.currentPosition, shuffleIndices(), available.keys)
+-                if (result.ids != queue) {
+-                    val wasPlaying = player.playWhenReady
+-                    if (result.ids.isEmpty()) {
+-                        player.stop(); player.clearMediaItems()
+-                        graph.playbackMessage.value = "No playable tracks remain in this library."
+-                    } else {
+-                        player.setMediaItems(result.ids.map { available.getValue(it).mediaItem() }, result.index, result.positionMs)
+-                        player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(result.order.toIntArray(), 0L))
+-                        player.prepare(); player.playWhenReady = wasPlaying
+-                    }
++            combine(graph.library.snapshot, graph.library.progress, restoring) { library, progress, restoring ->
++                library.takeIf { it.loaded && !progress.running && !restoring }
++            }.collect { library ->
++                if (library != null && reconcilePlayer(player, library.tracks.associateBy { it.id })) {
++                    if (player.mediaItemCount == 0) graph.playbackMessage.value = "No playable tracks remain in this library."
+                     save()
+                 }
+             }
+         }
+     }
+ 
+-    private fun shuffleIndices(): List<Int> {
+-        val timeline = player.currentTimeline
+-        if (timeline.isEmpty) return emptyList()
+-        val indices = mutableListOf<Int>()
+-        var index = timeline.getFirstWindowIndex(true)
+-        while (index != C.INDEX_UNSET && indices.size < player.mediaItemCount) {
+-            indices += index
+-            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
+-        }
+-        return indices
++    private fun shuffleIndices() = shuffleIndices(player)
++
++    private fun protectArtwork() {
++        val metadata = player.currentMediaItem?.mediaMetadata
++        graph.artwork.protectCurrent(listOfNotNull(metadata?.artworkUri?.path,
++            metadata?.extras?.getString("playerArtwork")).filter { it.isNotEmpty() }.toSet())
+     }
+ 
+     private fun snapshot() = PlaybackSnapshot((0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId },
+         player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0), player.shuffleModeEnabled, player.repeatMode, shuffleIndices())
+ 
+     private fun save() {
+-        if (restoring) return
++        if (restoring.value) return
+         val state = snapshot()
+         saveJob?.cancel()
+         saveJob = serviceScope.launch { graph.preferences.savePlayback(state) }
+@@ -172,14 +190,15 @@
+     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+     override fun onTaskRemoved(rootIntent: Intent?) {
+         save()
+-        if (!player.playWhenReady) pauseAllPlayersAndStopSelf()
++        super.onTaskRemoved(rootIntent)
+         // Active playback intentionally survives swiping the app out of Recents.
+     }
+     override fun onDestroy() {
+-        val finalState = if (::player.isInitialized && !restoring) snapshot() else null
++        val finalState = if (::player.isInitialized && !restoring.value) snapshot() else null
+         serviceScope.cancel()
+         if (finalState != null) graph.scope.launch { graph.preferences.savePlayback(finalState) }
+         session?.release(); player.release(); session = null
++        graph.artwork.protectCurrent(emptySet())
+         super.onDestroy()
+     }
+ }
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/playback/QueueOperations.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/playback/QueueOperations.kt
+@@ -0,0 +1,75 @@
++package com.lyra.sona.android.playback
++
++import android.os.Bundle
++import androidx.media3.common.C
++import androidx.media3.common.MediaItem
++import androidx.media3.common.Player
++import androidx.media3.common.util.UnstableApi
++import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.exoplayer.source.ShuffleOrder
++import androidx.media3.session.SessionCommand
++import com.lyra.sona.android.library.Track
++
++object QueueCommands {
++    val enqueue = SessionCommand("com.lyra.sona.ENQUEUE", Bundle.EMPTY)
++    val move = SessionCommand("com.lyra.sona.MOVE", Bundle.EMPTY)
++}
++
++fun shuffleIndices(player: Player): List<Int> {
++    val timeline = player.currentTimeline
++    if (timeline.isEmpty) return emptyList()
++    val indices = mutableListOf<Int>()
++    var index = timeline.getFirstWindowIndex(true)
++    while (index != C.INDEX_UNSET && indices.size < player.mediaItemCount) {
++        indices += index
++        index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
++    }
++    return indices
++}
++
++@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
++fun enqueueItems(player: ExoPlayer, items: List<MediaItem>, next: Boolean) {
++    if (items.isEmpty()) return
++    val oldOrder = shuffleIndices(player)
++    val current = player.currentMediaItemIndex
++    val insertion = if (next) (current + 1).coerceIn(0, player.mediaItemCount) else player.mediaItemCount
++    val order = oldOrder.map { if (it >= insertion) it + items.size else it }.toMutableList()
++    val afterCurrent = if (next && current >= 0) oldOrder.indexOf(current) + 1 else order.size
++    order.addAll(afterCurrent.coerceIn(0, order.size), (insertion until insertion + items.size).toList())
++    player.addMediaItems(insertion, items)
++    player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(order.toIntArray(), 0L))
++}
++
++/** Queue positions refer to original indices; while shuffled the UI displays shuffle traversal. */
++@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
++fun moveQueuedItem(player: ExoPlayer, from: Int, to: Int) {
++    if (from !in 0 until player.mediaItemCount || to !in 0 until player.mediaItemCount || from == to) return
++    if (!player.shuffleModeEnabled) { player.moveMediaItem(from, to); return }
++    val order = shuffleIndices(player).toMutableList()
++    val target = order.indexOf(to)
++    order.remove(from)
++    order.add(target, from)
++    player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(order.toIntArray(), 0L))
++}
++
++/** Removing non-current occurrences keeps their retained MediaSources and playback position alive. */
++fun reconcilePlayer(player: Player, available: Map<String, Track>): Boolean {
++    var changed = false
++    for (index in player.mediaItemCount - 1 downTo 0) {
++        if (player.getMediaItemAt(index).mediaId !in available) { player.removeMediaItem(index); changed = true }
++    }
++    for (index in 0 until player.mediaItemCount) {
++        val item = player.getMediaItemAt(index)
++        val updated = available.getValue(item.mediaId).mediaItem()
++        // Keep the existing source configuration for metadata-only changes.
++        val replacement = item.buildUpon().setMediaMetadata(updated.mediaMetadata).build()
++        val oldExtras = item.mediaMetadata.extras
++        val newExtras = replacement.mediaMetadata.extras
++        if (item.mediaMetadata != replacement.mediaMetadata || oldExtras?.getLong("durationMs") != newExtras?.getLong("durationMs") ||
++            oldExtras?.getString("playerArtwork") != newExtras?.getString("playerArtwork")) {
++            player.replaceMediaItem(index, replacement); changed = true
++        }
++    }
++    if (changed && player.mediaItemCount == 0) { player.pause(); player.stop() }
++    return changed
++}
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/ui/LyraApp.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/ui/LyraApp.kt
+@@ -3,6 +3,8 @@
+ import android.Manifest
+ import android.content.pm.PackageManager
+ import android.net.Uri
++import android.content.Intent
++import android.provider.Settings
+ import android.os.Build
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+@@ -35,6 +37,8 @@
+ import androidx.compose.ui.unit.dp
+ import androidx.core.content.ContextCompat
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import androidx.lifecycle.compose.LifecycleEventEffect
++import androidx.lifecycle.Lifecycle
+ import androidx.media3.common.MediaItem
+ import androidx.media3.common.Player
+ import androidx.navigation.NavType
+@@ -293,14 +297,16 @@
+ 
+ @Composable
+ private fun QueueScreen(playback: PlaybackUi, model: LyraViewModel) {
++    val order = playback.queueOrder.takeIf { validQueueOrder(it, playback.queue.size) } ?: playback.queue.indices.toList()
+     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
+         item { SectionTitle("Your queue · ${playback.queue.size}") }
+         if (playback.queue.isEmpty()) item { Text("Add tracks from a playlist or search.", Modifier.padding(8.dp), color = Muted) }
+-        items(playback.queue.size, key = { "${playback.queue[it].mediaId}:$it" }) { index ->
++        items(order.size, key = { "${playback.queue[order[it]].mediaId}:${order[it]}" }) { displayIndex ->
++            val index = order[displayIndex]
+             val item = playback.queue[index]
+             var menu by remember { mutableStateOf(false) }
+             Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable { model.jump(index) }.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+-                Text(if (index == playback.currentIndex) "▶" else "${index + 1}", color = Gold, modifier = Modifier.width(36.dp))
++                Text(if (index == playback.currentIndex) "▶" else "${displayIndex + 1}", color = Gold, modifier = Modifier.width(36.dp))
+                 Column(Modifier.weight(1f)) {
+                     Text(item.mediaMetadata.title?.toString().orEmpty(), maxLines = 2, color = if (index == playback.currentIndex) Gold else MaterialTheme.colorScheme.onSurface)
+                     Text(item.mediaMetadata.artist?.toString().orEmpty(), color = Muted, style = MaterialTheme.typography.bodySmall)
+@@ -308,8 +314,8 @@
+                 Box {
+                     Control(Icons.Outlined.MoreVert, "Queue actions for ${item.mediaMetadata.title}") { menu = true }
+                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
+-                        DropdownMenuItem(text = { Text("Move up") }, enabled = index > 0, onClick = { model.move(index, index - 1); menu = false })
+-                        DropdownMenuItem(text = { Text("Move down") }, enabled = index < playback.queue.lastIndex, onClick = { model.move(index, index + 1); menu = false })
++                        DropdownMenuItem(text = { Text("Move up") }, enabled = displayIndex > 0, onClick = { model.move(index, order[displayIndex - 1]); menu = false })
++                        DropdownMenuItem(text = { Text("Move down") }, enabled = displayIndex < order.lastIndex, onClick = { model.move(index, order[displayIndex + 1]); menu = false })
+                         DropdownMenuItem(text = { Text("Remove from queue") }, onClick = { model.remove(index); menu = false })
+                     }
+                 }
+@@ -317,12 +323,16 @@
+         }
+     }
+ }
++private fun validQueueOrder(order: List<Int>, size: Int) = order.size == size && order.toSet() == (0 until size).toSet()
+ 
+ @Composable
+ private fun SettingsScreen(tree: String, model: LyraViewModel, choose: () -> Unit) {
+     val context = LocalContext.current
+     var notifications by remember { mutableStateOf(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) }
+     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
++    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
++        notifications = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
++    }
+     val metrics by model.library.metrics.collectAsStateWithLifecycle()
+     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+         item { Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+@@ -338,6 +348,9 @@
+             SettingsCard("Notifications") {
+                 Text(if (notifications) "Notification permission enabled." else "General notifications are disabled. Playback and media-session controls remain available.", color = Muted)
+                 if (Build.VERSION.SDK_INT >= 33 && !notifications) OutlinedButton(onClick = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text("Enable notifications") }
++                TextButton(onClick = {
++                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
++                }) { Text("Open notification settings") }
+                 Text("Declining notification permission does not prevent listening.", color = Muted, style = MaterialTheme.typography.bodySmall)
+             }
+         }
+@@ -345,7 +358,7 @@
+             SettingsCard("Lyra Gold") {
+                 Text("An offline home for your music. No accounts, network access, or changes to your music files.", color = Muted)
+                 Text("Liked Songs contains the tracks directly in your music folder; it is not a favorites list.", color = Muted, style = MaterialTheme.typography.bodySmall)
+-                Text("Version 1.0.0 · Android 8+", color = Gold)
++                Text("Version ${com.lyra.sona.android.BuildConfig.VERSION_NAME} · Android 8+", color = Gold)
+             }
+         }
+         if (metrics != null) item {
+--- 1.0.0/app/src/main/java/com/lyra/sona/android/ui/LyraViewModel.kt
++++ 1.0.1/app/src/main/java/com/lyra/sona/android/ui/LyraViewModel.kt
+@@ -10,14 +10,23 @@
+ import androidx.lifecycle.viewModelScope
+ import androidx.media3.common.MediaItem
+ import androidx.media3.common.Player
++import androidx.media3.common.util.Util
+ import androidx.media3.session.MediaController
+ import androidx.media3.session.SessionToken
++import androidx.media3.session.SessionCommand
++import androidx.media3.session.SessionResult
++import com.google.common.util.concurrent.ListenableFuture
+ import com.lyra.sona.android.LyraApplication
+ import com.lyra.sona.android.library.Track
+ import com.lyra.sona.android.playback.PlaybackService
+ import com.lyra.sona.android.playback.mediaItem
++import com.lyra.sona.android.playback.QueueCommands
++import com.lyra.sona.android.playback.shuffleIndices
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.NonCancellable
++import kotlinx.coroutines.withContext
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.isActive
+@@ -25,7 +34,7 @@
+ 
+ data class PlaybackUi(val ready: Boolean = false, val current: MediaItem? = null, val playing: Boolean = false,
+     val position: Long = 0, val duration: Long = 0, val queue: List<MediaItem> = emptyList(), val currentIndex: Int = -1,
+-    val shuffle: Boolean = false, val repeat: Int = Player.REPEAT_MODE_OFF)
++    val shuffle: Boolean = false, val repeat: Int = Player.REPEAT_MODE_OFF, val queueOrder: List<Int> = emptyList())
+ 
+ @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+ class LyraViewModel(application: Application) : AndroidViewModel(application) {
+@@ -35,27 +44,100 @@
+     val selectionError = MutableStateFlow("")
+     val selecting = MutableStateFlow(false)
+     private var controller: MediaController? = null
+-    private val future = MediaController.Builder(application, SessionToken(application, ComponentName(application, PlaybackService::class.java))).buildAsync()
++    private var future: ListenableFuture<MediaController>? = null
++    private var connectionGeneration = 0
++    private var reconnectJob: Job? = null
++    private var pollJob: Job? = null
++    private var uiActive = true
++    private var cleared = false
++    private var reconnectDelay = 1000L
++    private var connectionMessage = ""
+ 
+     init {
+-        future.addListener({
++        connect()
++        startPolling()
++        viewModelScope.launch {
++            val selected = graph.preferences.tree.first()
++            if (selected.isNotBlank()) releaseOldGrants(Uri.parse(selected))
++            library.refresh()
++        }
++    }
++
++    private fun connect() {
++        if (cleared || !uiActive || future != null) return
++        val generation = ++connectionGeneration
++        val application = getApplication<Application>()
++        val connecting = MediaController.Builder(application, SessionToken(application, ComponentName(application, PlaybackService::class.java)))
++            .setListener(object : MediaController.Listener {
++                override fun onDisconnected(controller: MediaController) {
++                    if (generation == connectionGeneration && !cleared) {
++                        connectionMessage = "Playback service disconnected. Reconnecting…"
++                        graph.playbackMessage.value = connectionMessage
++                        disconnect(); scheduleReconnect()
++                    }
++                }
++                override fun onExtrasChanged(controller: MediaController, extras: Bundle) { if (generation == connectionGeneration) updatePlayer(false) }
++            }).buildAsync()
++        future = connecting
++        connecting.addListener({
++            if (generation != connectionGeneration || cleared) return@addListener
+             try {
+-                controller = future.get().also {
+-                    it.addListener(object : Player.Listener { override fun onEvents(player: Player, events: Player.Events) { updatePlayer(events.contains(Player.EVENT_TIMELINE_CHANGED)) } })
++                controller = connecting.get().also {
++                    it.addListener(object : Player.Listener {
++                        override fun onEvents(player: Player, events: Player.Events) {
++                            if (player === controller) updatePlayer(events.contains(Player.EVENT_TIMELINE_CHANGED) ||
++                                events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED))
++                        }
++                    })
+                 }
++                reconnectDelay = 1000L
++                if (graph.playbackMessage.value == connectionMessage) graph.playbackMessage.value = ""
++                connectionMessage = ""
+                 updatePlayer()
+-            } catch (error: Exception) { graph.playbackMessage.value = "Playback service could not connect: ${error.cause?.message ?: error.message}" }
++            } catch (error: Exception) {
++                connectionMessage = "Playback service could not connect: ${error.cause?.message ?: error.message}. Reconnecting…"
++                graph.playbackMessage.value = connectionMessage
++                disconnect(); scheduleReconnect()
++            }
+         }, ContextCompat.getMainExecutor(application))
+-        viewModelScope.launch { graph.preferences.tree.first(); library.refresh() }
+-        viewModelScope.launch { while (isActive) { delay(250); updatePlayer(rebuildQueue = false) } }
++    }
++
++    private fun disconnect() {
++        connectionGeneration++
++        val previous = future
++        future = null; controller = null
++        playback.value = playback.value.copy(ready = false, playing = false)
++        previous?.let { MediaController.releaseFuture(it) }
++    }
++
++    private fun scheduleReconnect() {
++        if (!uiActive || cleared || reconnectJob?.isActive == true) return
++        reconnectJob = viewModelScope.launch {
++            delay(reconnectDelay)
++            reconnectDelay = (reconnectDelay * 2).coerceAtMost(15000)
++            reconnectJob = null
++            connect()
++        }
++    }
++
++    private fun startPolling() {
++        if (pollJob?.isActive == true) return
++        pollJob = viewModelScope.launch { while (isActive) { delay(250); updatePlayer(rebuildQueue = false) } }
++    }
++
++    fun setUiActive(active: Boolean) {
++        uiActive = active
++        if (active) { connect(); startPolling() }
++        else { reconnectJob?.cancel(); reconnectJob = null; pollJob?.cancel(); pollJob = null; disconnect() }
+     }
+ 
+     private fun updatePlayer(rebuildQueue: Boolean = true) {
+         val player = controller ?: return
+-        playback.value = PlaybackUi(player.sessionExtras.getBoolean("ready", false), player.currentMediaItem, player.playWhenReady,
++        playback.value = PlaybackUi(player.isConnected && player.sessionExtras.getBoolean("ready", false), player.currentMediaItem, !Util.shouldShowPlayButton(player),
+             player.currentPosition.coerceAtLeast(0), player.duration.takeIf { it > 0 } ?: player.currentMediaItem?.mediaMetadata?.extras?.getLong("durationMs") ?: 0,
+             if (rebuildQueue) (0 until player.mediaItemCount).map { player.getMediaItemAt(it) } else playback.value.queue,
+-            player.currentMediaItemIndex, player.shuffleModeEnabled, player.repeatMode)
++            player.currentMediaItemIndex, player.shuffleModeEnabled, player.repeatMode,
++            if (rebuildQueue) (if (player.shuffleModeEnabled) shuffleIndices(player) else (0 until player.mediaItemCount).toList()) else playback.value.queueOrder)
+     }
+ 
+     fun chooseFolder(uri: Uri, resultFlags: Int) {
+@@ -69,13 +151,24 @@
+                 if (!alreadyHeld && readFlag == 0) error("Android rejected read access to that folder.")
+                 if (!alreadyHeld) resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                 library.select(uri.toString())
++                releaseOldGrants(uri)
+             } catch (cancelled: CancellationException) {
+-                if (!alreadyHeld) runCatching { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
++                withContext(NonCancellable) {
++                    if (graph.preferences.tree.first() == uri.toString()) releaseOldGrants(uri)
++                    else if (!alreadyHeld) runCatching { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
++                }
+                 throw cancelled
+             } catch (error: Exception) {
+                 if (!alreadyHeld) runCatching { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                 selectionError.value = "${error.message ?: "That folder could not be selected."} Choose Music or an allowed subfolder. Your previous library has not changed."
+             } finally { selecting.value = false }
++        }
++    }
++    private fun releaseOldGrants(selected: Uri) {
++        graph.contentResolver.persistedUriPermissions.filter { it.uri != selected }.forEach {
++            val flags = (if (it.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
++                (if (it.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
++            runCatching { graph.contentResolver.releasePersistableUriPermission(it.uri, flags) }
+         }
+     }
+     fun rejectedSelection() { selectionError.value = "Android returned no usable folder. Choose Music or an allowed subfolder." }
+@@ -87,7 +180,7 @@
+         player.setMediaItems(tracks.map { it.mediaItem() }, index.coerceIn(tracks.indices), 0)
+         player.prepare(); player.play(); updatePlayer()
+     }
+-    fun toggle() { controller?.let { if (it.playWhenReady) it.pause() else { it.prepare(); it.play() } }; updatePlayer() }
++    fun toggle() { controller?.let { Util.handlePlayPauseButtonAction(it) }; updatePlayer() }
+     fun previous() { controller?.seekToPreviousMediaItem(); updatePlayer() }
+     fun next() { controller?.seekToNextMediaItem(); updatePlayer() }
+     fun seek(position: Long) { controller?.seekTo(position.coerceAtLeast(0)); updatePlayer() }
+@@ -96,11 +189,22 @@
+     fun enqueue(tracks: List<Track>, next: Boolean = false) {
+         val player = controller ?: return
+         if (!playback.value.ready) return
+-        val position = if (next) (player.currentMediaItemIndex + 1).coerceIn(0, player.mediaItemCount) else player.mediaItemCount
+-        player.addMediaItems(position, tracks.map { it.mediaItem() }); updatePlayer()
++        sendQueueCommand(player, QueueCommands.enqueue, Bundle().apply {
++            putStringArrayList("ids", ArrayList(tracks.map { it.id })); putBoolean("next", next)
++        })
+     }
+     fun remove(index: Int) { controller?.let { if (index in 0 until it.mediaItemCount) it.removeMediaItem(index) }; updatePlayer() }
+-    fun move(from: Int, to: Int) { controller?.let { if (from in 0 until it.mediaItemCount && to in 0 until it.mediaItemCount) it.moveMediaItem(from, to) }; updatePlayer() }
++    fun move(from: Int, to: Int) { controller?.let { sendQueueCommand(it, QueueCommands.move, Bundle().apply { putInt("from", from); putInt("to", to) }) } }
++    private fun sendQueueCommand(player: MediaController, command: SessionCommand, args: Bundle) {
++        if (!playback.value.ready) return
++        val result = player.sendCustomCommand(command, args)
++        result.addListener({
++            try {
++                if (result.get().resultCode != SessionResult.RESULT_SUCCESS) graph.playbackMessage.value = "The queue changed before that action completed. Try again."
++                updatePlayer()
++            } catch (_: Exception) { graph.playbackMessage.value = "The playback service disconnected. Try again after reconnection." }
++        }, ContextCompat.getMainExecutor(getApplication()))
++    }
+     fun jump(index: Int) { controller?.seekTo(index, 0); controller?.prepare(); controller?.play(); updatePlayer() }
+-    override fun onCleared() { MediaController.releaseFuture(future); super.onCleared() }
++    override fun onCleared() { cleared = true; reconnectJob?.cancel(); pollJob?.cancel(); disconnect(); super.onCleared() }
+ }
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/AndroidPersistenceTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/AndroidPersistenceTest.kt
+@@ -18,6 +18,26 @@
+ @RunWith(RobolectricTestRunner::class)
+ @Config(sdk = [35], application = Application::class)
+ class AndroidPersistenceTest {
++    @Test fun artworkBudgetAndPruningRetainCurrentCoverAndRemoveOrphans() {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
++        val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
++        val initial = ArtworkCache(context).save("playing", bytes)
++        val pairSize = java.io.File(initial.first).length() + java.io.File(initial.second).length()
++        val cache = ArtworkCache(context, maxBytes = pairSize * 2 + 10)
++        cache.protectCurrent(setOf(initial.first, initial.second))
++        repeat(20) { cache.save("evict-$it", bytes) }
++        val directory = java.io.File(context.filesDir, "artwork")
++        assertTrue(directory.listFiles().orEmpty().sumOf { it.length() } <= pairSize * 2 + 10)
++        assertTrue(java.io.File(initial.first).isFile)
++        assertTrue(java.io.File(initial.second).isFile)
++        cache.prune(emptySet())
++        assertEquals(setOf(initial.first, initial.second), directory.listFiles().orEmpty().map { it.absolutePath }.toSet())
++        cache.protectCurrent(emptySet())
++        cache.prune(emptySet())
++        assertTrue(directory.listFiles().orEmpty().isEmpty())
++        bitmap.recycle()
++    }
+     @Test fun playbackSnapshotSurvivesSerializationAsPausedRestorationData() {
+         val saved = PlaybackSnapshot(listOf("a", "b", "a"), 2, 54321, true, 2, listOf(2, 0, 1))
+         assertEquals(saved, PlaybackSnapshot.decode(saved.encode()))
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/LibraryTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/LibraryTest.kt
+@@ -25,6 +25,15 @@
+         entry.name.substringBeforeLast('.'), durationMs = 1000, metadataError = error)
+ 
+ class LibraryTest {
++    @Test fun unknownModificationTimeAndEvictedArtworkRequireRevalidation() {
++        val unknownTime = DocumentEntry("song", "song.mp3", "audio/mpeg", 100, null)
++        assertFalse(track(unknownTime).matches(unknownTime))
++        val zeroTime = unknownTime.copy(modified = 0)
++        assertFalse(track(zeroTime).matches(zeroTime))
++        val known = audio("song")
++        assertFalse(track(known).copy(artwork = "missing-artwork-file").matches(known))
++        assertTrue(track(known).matches(known))
++    }
+     @Test fun audioDetectionHandlesProvidersAndDirectories() {
+         for (mime in listOf(null, "application/octet-stream", "application/incorrect", "audio/flac")) {
+             for (extension in listOf("MP3", "flac", "m4a", "aac", "wav", "ogg", "opus")) assertTrue(audio("x", "Song.$extension", mime = mime).isAudio)
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/Media3QueueTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/Media3QueueTest.kt
+@@ -5,6 +5,7 @@
+ import androidx.media3.common.Player
+ import androidx.media3.exoplayer.ExoPlayer
+ import androidx.media3.exoplayer.source.ShuffleOrder
++import com.lyra.sona.android.playback.*
+ import androidx.test.core.app.ApplicationProvider
+ import org.junit.Assert.*
+ import org.junit.Test
+@@ -16,6 +17,53 @@
+ @Config(sdk = [35], application = Application::class)
+ @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+ class Media3QueueTest {
++    @Test fun shuffledQueueAppendAndMovePreserveDuplicateOccurrencesAndCurrentSource() {
++        val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
++        fun item(id: String) = MediaItem.Builder().setMediaId(id).setUri("content://test/$id").build()
++        try {
++            player.setMediaItems(listOf(item("a"), item("b"), item("a")), 0, 2500)
++            player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(0, 2, 1), 0L))
++            player.shuffleModeEnabled = true
++            val uid = player.currentTimeline.getUidOfPeriod(0)
++            enqueueItems(player, listOf(item("a"), item("next")), next = true)
++            assertEquals(listOf(0, 1, 2, 4, 3), shuffleIndices(player))
++            enqueueItems(player, listOf(item("last")), next = false)
++            assertEquals(listOf(0, 1, 2, 4, 3, 5), shuffleIndices(player))
++            moveQueuedItem(player, 4, 2)
++            assertEquals(listOf(0, 1, 4, 2, 3, 5), shuffleIndices(player))
++            assertEquals(uid, player.currentTimeline.getUidOfPeriod(0))
++            assertEquals(2500L, player.currentPosition)
++        } finally { player.release() }
++    }
++
++    @Test fun deletingOtherQueueOccurrencesPreservesCurrentMediaSourceAndPosition() {
++        val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
++        val retained = track(audio("retained"))
++        val removed = track(audio("removed"))
++        try {
++            player.setMediaItems(listOf(removed.mediaItem(), retained.mediaItem(), removed.mediaItem(), retained.mediaItem()), 1, 4321)
++            player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(1, 3, 2, 0), 0L))
++            player.shuffleModeEnabled = true
++            val uid = player.currentTimeline.getUidOfPeriod(1)
++            assertTrue(reconcilePlayer(player, mapOf(retained.id to retained)))
++            assertEquals(2, player.mediaItemCount)
++            assertEquals(0, player.currentMediaItemIndex)
++            assertEquals(uid, player.currentTimeline.getUidOfPeriod(0))
++            assertEquals(4321L, player.currentPosition)
++            assertEquals(listOf(0, 1), shuffleIndices(player))
++        } finally { player.release() }
++    }
++
++    @Test fun changedExtrasRefreshEvenWhenStandardMetadataIsUnchanged() {
++        val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
++        val old = track(audio("track"))
++        try {
++            player.setMediaItems(listOf(old.mediaItem()))
++            assertTrue(reconcilePlayer(player, mapOf(old.id to old.copy(durationMs = 9999, artwork = "large-cover"))))
++            assertEquals(9999L, player.currentMediaItem?.mediaMetadata?.extras?.getLong("durationMs"))
++            assertEquals("large-cover", player.currentMediaItem?.mediaMetadata?.extras?.getString("playerArtwork"))
++        } finally { player.release() }
++    }
+     @Test fun realMedia3QueueSupportsInsertMoveRemoveAndDuplicateItems() {
+         val player = ExoPlayer.Builder(ApplicationProvider.getApplicationContext<Application>()).build()
+         fun item(id: String) = MediaItem.Builder().setMediaId(id).setUri("content://test/$id").build()
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
+@@ -0,0 +1,145 @@
++package com.lyra.sona.android
++
++import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.session.MediaSession
++import androidx.media3.session.SessionResult
++import android.os.Bundle
++import android.os.Process
++import android.content.Intent
++import com.lyra.sona.android.playback.QueueCommands
++import com.lyra.sona.android.playback.shuffleIndices
++import androidx.media3.exoplayer.source.ShuffleOrder
++import androidx.test.core.app.ApplicationProvider
++import com.lyra.sona.android.library.*
++import com.lyra.sona.android.playback.PlaybackService
++import com.lyra.sona.android.playback.mediaItem
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.test.*
++import org.junit.Assert.*
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.Robolectric
++import org.robolectric.Shadows.shadowOf
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++
++/** Uses the production service collector and a real ExoPlayer; does not decode audio. */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35], application = LyraApplication::class)
++@OptIn(ExperimentalCoroutinesApi::class)
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++class PlaybackServiceRegressionTest {
++    private fun field(target: Any, name: String, value: Any) {
++        target.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(target, value)
++    }
++    private fun player(service: PlaybackService) = service.javaClass.getDeclaredField("player").apply { isAccessible = true }.get(service) as ExoPlayer
++    @Suppress("UNCHECKED_CAST")
++    private fun restoration(service: PlaybackService) = service.javaClass.getDeclaredField("restoring").apply { isAccessible = true }.get(service) as MutableStateFlow<Boolean>
++    private fun session(service: PlaybackService) = service.javaClass.getDeclaredField("session").apply { isAccessible = true }.get(service) as MediaSession
++    private fun callback(session: MediaSession): MediaSession.Callback {
++        val impl = session.javaClass.getDeclaredMethod("getImpl").apply { isAccessible = true }.invoke(session)
++        return impl.javaClass.getDeclaredField("callback").apply { isAccessible = true }.get(impl) as MediaSession.Callback
++    }
++
++    @Test fun customQueueCommandsUseCurrentServiceQueueAndRejectOtherPackages() = runTest {
++        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
++        val app = ApplicationProvider.getApplicationContext<LyraApplication>()
++        val source = FakeDocuments(emptyMap())
++        val repository = LibraryRepository(MemoryDao(), MemoryPreferences(), source,
++            ScanEngine(source, MetadataSource { _, _, _, _ -> error("unused") }), backgroundScope)
++        val a = track(audio("a")); val b = track(audio("b")); val c = track(audio("c")); val next = track(audio("next"))
++        val state = MutableStateFlow(LibrarySnapshot(listOf(a, b, c, next), tree = "tree", loaded = true))
++        field(repository, "snapshot", state)
++        field(app, "library\$delegate", lazyOf(repository))
++        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
++        try {
++            restoration(service).value = false
++            val player = player(service)
++            player.setMediaItems(listOf(a.mediaItem(), b.mediaItem(), c.mediaItem()), 0, 1200)
++            player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(0, 2, 1), 0))
++            player.shuffleModeEnabled = true
++            val session = session(service)
++            val callback = callback(session)
++            fun controller(packageName: String) = MediaSession.ControllerInfo.createTestOnlyControllerInfo(packageName,
++                Process.myUid(), 1, 1, 1, false, Bundle.EMPTY, true)
++            val own = controller(app.packageName)
++            assertTrue(callback.onConnect(session, own).availableSessionCommands.contains(QueueCommands.enqueue))
++            val args = Bundle().apply { putStringArrayList("ids", arrayListOf(next.id, next.id)); putBoolean("next", true) }
++            assertEquals(SessionResult.RESULT_ERROR_PERMISSION_DENIED, callback.onCustomCommand(session, controller("other.app"), QueueCommands.enqueue, args).get().resultCode)
++            assertEquals(3, player.mediaItemCount)
++            assertEquals(SessionResult.RESULT_SUCCESS, callback.onCustomCommand(session, own, QueueCommands.enqueue, args).get().resultCode)
++            assertEquals(listOf(0, 1, 2, 4, 3), shuffleIndices(player))
++            assertEquals(next.id, player.getMediaItemAt(player.nextMediaItemIndex).mediaId)
++            assertEquals(1200L, player.currentPosition)
++        } finally { service.onDestroy(); Dispatchers.resetMain() }
++    }
++
++    @Test fun taskRemovalStopsNonForegroundPlaybackEvenWithPlayIntentTrue() = runTest {
++        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
++        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
++        try {
++            restoration(service).value = false
++            service.addSession(session(service))
++            player(service).playWhenReady = true
++            assertFalse(service.isPlaybackOngoing)
++            service.onTaskRemoved(Intent())
++            assertTrue(shadowOf(service).isStoppedBySelf)
++            assertFalse(player(service).playWhenReady)
++        } finally { service.onDestroy(); Dispatchers.resetMain() }
++    }
++
++    @Test fun scanCompletionReprocessesLatestSnapshotWithoutAnotherLibraryEmission() = runTest {
++        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
++        val app = ApplicationProvider.getApplicationContext<LyraApplication>()
++        val source = FakeDocuments(emptyMap())
++        val repository = LibraryRepository(MemoryDao(), MemoryPreferences(), source,
++            ScanEngine(source, MetadataSource { _, _, _, _ -> error("unused") }), backgroundScope)
++        val state = MutableStateFlow(LibrarySnapshot())
++        field(repository, "snapshot", state)
++        field(app, "library\$delegate", lazyOf(repository))
++        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
++        try {
++            restoration(service).value = false
++            val queued = track(audio("deleted"))
++            player(service).setMediaItems(listOf(queued.mediaItem()))
++            repository.progress.value = ScanProgress(running = true)
++            state.value = LibrarySnapshot(emptyList(), listOf(Folder("root", "tree", "root", "Liked Songs", true)), "tree", loaded = true)
++            runCurrent()
++            assertEquals(1, player(service).mediaItemCount)
++            repository.progress.value = ScanProgress(running = false)
++            runCurrent()
++            assertEquals(0, player(service).mediaItemCount)
++        } finally { service.onDestroy(); Dispatchers.resetMain() }
++    }
++
++    @Test fun metadataRefreshUpdatesCurrentItemWithoutReplacingItsSource() = runTest {
++        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
++        val app = ApplicationProvider.getApplicationContext<LyraApplication>()
++        val source = FakeDocuments(emptyMap())
++        val repository = LibraryRepository(MemoryDao(), MemoryPreferences(), source,
++            ScanEngine(source, MetadataSource { _, _, _, _ -> error("unused") }), backgroundScope)
++        val state = MutableStateFlow(LibrarySnapshot())
++        field(repository, "snapshot", state)
++        field(app, "library\$delegate", lazyOf(repository))
++        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
++        try {
++            restoration(service).value = false
++            val old = track(audio("song")).copy(title = "Old title")
++            player(service).setMediaItems(listOf(old.mediaItem()))
++            val uid = player(service).currentTimeline.getUidOfPeriod(0)
++            player(service).seekTo(0, 1234)
++            state.value = LibrarySnapshot(listOf(old.copy(title = "New title", durationMs = 2000)), listOf(Folder("root", "tree", "root", "Liked Songs", true)), "tree", loaded = true)
++            runCurrent()
++            assertEquals("New title", player(service).currentMediaItem?.mediaMetadata?.title.toString())
++            assertEquals(2000L, player(service).currentMediaItem?.mediaMetadata?.extras?.getLong("durationMs"))
++            assertEquals(uid, player(service).currentTimeline.getUidOfPeriod(0))
++            assertEquals(1234L, player(service).currentPosition)
++            // Control: a change of IDs invokes reconciliation on the same collector.
++            state.value = state.value.copy(tracks = emptyList())
++            runCurrent()
++            assertEquals(0, player(service).mediaItemCount)
++        } finally { service.onDestroy(); Dispatchers.resetMain() }
++    }
++}
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/PlayerControlsTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/PlayerControlsTest.kt
+@@ -0,0 +1,75 @@
++package com.lyra.sona.android
++
++import android.os.Bundle
++import android.os.Looper
++import android.content.ComponentName
++import androidx.lifecycle.ViewModelStore
++import androidx.media3.common.MediaItem
++import androidx.media3.common.Player
++import androidx.media3.common.SimpleBasePlayer
++import androidx.media3.session.MediaController
++import androidx.media3.session.MediaSession
++import androidx.test.core.app.ApplicationProvider
++import com.google.common.util.concurrent.Futures
++import com.google.common.util.concurrent.ListenableFuture
++import com.lyra.sona.android.playback.PlaybackService
++import com.lyra.sona.android.ui.LyraViewModel
++import org.junit.Assert.*
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.Shadows.shadowOf
++import org.robolectric.annotation.Config
++
++/** A local MediaController/MediaSession transport with deterministic state, without audio decoding. */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35], application = LyraApplication::class)
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++class PlayerControlsTest {
++    private class FinishedPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
++        val actions = mutableListOf<String>()
++        private var state = State.Builder().setAvailableCommands(Player.Commands.Builder().addAllCommands().build())
++            .setPlaylist(listOf(MediaItemData.Builder("song").setMediaItem(MediaItem.fromUri("content://test/song"))
++                .setIsSeekable(true).setDurationUs(1000000).build()))
++            .setPlaybackState(Player.STATE_ENDED).setPlayWhenReady(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
++            .setContentPositionMs(1000).build()
++        override fun getState() = state
++        override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
++            actions += "seek"
++            state = state.buildUpon().setContentPositionMs(0).setPlaybackState(Player.STATE_READY).build()
++            return Futures.immediateVoidFuture()
++        }
++        override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
++            actions += if (playWhenReady) "play" else "pause"
++            state = state.buildUpon().setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST).build()
++            return Futures.immediateVoidFuture()
++        }
++        override fun handleRelease(): ListenableFuture<*> = Futures.immediateVoidFuture()
++    }
++
++    @Test fun finishedQueueShowsPlayAndFirstTapSeeksToRestartThroughController() {
++        val app = ApplicationProvider.getApplicationContext<LyraApplication>()
++        shadowOf(app).declareComponentUnbindable(ComponentName(app, PlaybackService::class.java))
++        val model = LyraViewModel(app)
++        val store = ViewModelStore().apply { put("model", model) }
++        model.setUiActive(false)
++        val player = FinishedPlayer()
++        val session = MediaSession.Builder(app, player).setSessionExtras(Bundle().apply { putBoolean("ready", true) }).build()
++        val future = MediaController.Builder(app, session.token).buildAsync()
++        try {
++            val deadline = System.nanoTime() + 3_000_000_000L
++            while (!future.isDone && System.nanoTime() < deadline) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5) }
++            assertTrue("Local media controller must connect", future.isDone)
++            val controller = future.get()
++            model.javaClass.getDeclaredField("controller").apply { isAccessible = true }.set(model, controller)
++            model.javaClass.getDeclaredMethod("updatePlayer", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(model, true)
++            assertTrue(model.playback.value.ready)
++            assertFalse(model.playback.value.playing)
++            model.toggle()
++            shadowOf(Looper.getMainLooper()).idle()
++            assertTrue(player.actions.contains("seek"))
++            assertFalse(player.actions.contains("pause"))
++            assertEquals(0L, player.currentPosition)
++        } finally { store.clear(); MediaController.releaseFuture(future); session.release(); player.release() }
++    }
++}
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/ProviderRegressionTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/ProviderRegressionTest.kt
+@@ -0,0 +1,153 @@
++package com.lyra.sona.android
++
++import android.app.Application
++import android.content.ContentProvider
++import android.content.ContentValues
++import android.database.Cursor
++import android.database.MatrixCursor
++import android.net.Uri
++import android.os.Bundle
++import android.os.CancellationSignal
++import android.os.ParcelFileDescriptor
++import android.graphics.Bitmap
++import android.graphics.Color
++import android.provider.DocumentsContract
++import androidx.media3.common.MediaItem
++import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.exoplayer.source.ShuffleOrder
++import androidx.test.core.app.ApplicationProvider
++import com.lyra.sona.android.library.*
++import com.lyra.sona.android.playback.enqueueItems
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.cancelAndJoin
++import kotlinx.coroutines.withContext
++import org.junit.Assert.*
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++import org.robolectric.shadows.ShadowContentResolver
++import java.io.File
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.TimeUnit
++
++/** Actual provider cursors and Media3 traversal, without audio decoding. */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35], application = Application::class)
++@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
++class ProviderRegressionTest {
++    private open class Provider : ContentProvider() {
++        override fun onCreate() = true
++        override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor = MatrixCursor(projection!!.map { it }.toTypedArray())
++        override fun getType(uri: Uri): String? = null
++        override fun insert(uri: Uri, values: ContentValues?): Uri? = null
++        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
++        override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
++    }
++
++    @Test fun folderArtworkWithoutFingerprintUsesNewImageContent() = runBlocking {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        val file = File(context.cacheDir, "review-cover.jpg")
++        fun write(color: Int) {
++            val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
++            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
++            bitmap.recycle()
++        }
++        ShadowContentResolver.registerProviderInternal("review.cover", object : Provider() {
++            override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
++        }.apply {
++            attachInfo(context, android.content.pm.ProviderInfo().apply { authority = "review.cover"; applicationInfo = context.applicationInfo })
++        })
++        val source = AndroidDocuments(context, ArtworkCache(context))
++        val entry = DocumentEntry("cover", "cover.jpg", "image/jpeg", null, null)
++        write(Color.RED)
++        val first = source.cover("content://review.cover/tree/root", entry)
++        write(Color.BLUE)
++        val second = source.cover("content://review.cover/tree/root", entry)
++        assertTrue(first.isNotEmpty())
++        assertTrue(second.isNotEmpty())
++        assertNotEquals(first, second)
++    }
++
++    @Test fun cancellingStalledQuerySignalsProviderAndReleasesScanWorker() = runBlocking {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        val started = CountDownLatch(1)
++        val cancelled = CountDownLatch(1)
++        ShadowContentResolver.registerProviderInternal("review.slow", object : Provider() {
++            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?, signal: CancellationSignal?): Cursor {
++                signal?.setOnCancelListener { cancelled.countDown() }
++                started.countDown()
++                cancelled.await(2, TimeUnit.SECONDS)
++                signal?.throwIfCanceled()
++                return super.query(uri, projection, selection, selectionArgs, sortOrder)
++            }
++        })
++        val source = AndroidDocuments(context, ArtworkCache(context))
++        val job = launch(Dispatchers.Default) { source.children("content://review.slow/tree/root", "root") }
++        try {
++            assertTrue(withContext(Dispatchers.IO) { started.await(2, TimeUnit.SECONDS) })
++            job.cancelAndJoin()
++            assertEquals(0L, cancelled.count)
++        } finally { job.cancelAndJoin() }
++    }
++    @Test fun unknownFingerprintRefreshesChangedMetadata() = runBlocking {
++        val entry = DocumentEntry("song", "song.mp3", "audio/mpeg", null, null)
++        val old = track(entry).copy(title = "Old title")
++        val source = FakeDocuments(mapOf("root" to listOf(entry)))
++        val result = ScanEngine(source, MetadataSource { tree, folder, document, _ ->
++            track(document, tree, folder).copy(title = "New title")
++        }).scan("tree", listOf(old))
++        assertEquals(1, result.metrics.metadataReads)
++        assertEquals("New title", result.snapshot.tracks.single().title)
++    }
++
++    @Test fun playNextAlwaysFollowsCurrentUnderShuffle() {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        var missed = 0
++        for (seed in 0L..19L) {
++            val player = ExoPlayer.Builder(context).build()
++            try {
++                fun item(id: String) = MediaItem.Builder().setMediaId(id).setUri("content://test/$id").build()
++                player.setMediaItems(listOf(item("a"), item("b"), item("c")), 0, 0)
++                player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(0, 2, 1), seed))
++                player.shuffleModeEnabled = true
++                enqueueItems(player, listOf(item("requested-next")), next = true)
++                val nextIndex = player.nextMediaItemIndex
++                if (nextIndex < 0 || player.getMediaItemAt(nextIndex).mediaId != "requested-next") missed++
++            } finally { player.release() }
++        }
++        assertEquals(0, missed)
++    }
++
++    private fun scanIncomplete(extra: Bundle): ScanResult = runBlocking {
++        val context = ApplicationProvider.getApplicationContext<Application>()
++        ShadowContentResolver.registerProviderInternal("review.provider", object : ContentProvider() {
++            override fun onCreate() = true
++            override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
++                MatrixCursor(projection!!.map { it }.toTypedArray()).apply { extras = extra }
++            override fun getType(uri: Uri): String? = null
++            override fun insert(uri: Uri, values: ContentValues?): Uri? = null
++            override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
++            override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
++        })
++        val tree = "content://review.provider/tree/root"
++        val source = AndroidDocuments(context, ArtworkCache(context))
++        ScanEngine(source, MetadataSource { _, _, _, _ -> error("Not expected") }).scan(tree, listOf(track(audio("old"), tree)))
++    }
++
++    @Test fun loadingProviderAbortsScanInsteadOfPublishingMissingFiles() {
++        try {
++            scanIncomplete(Bundle().apply { putBoolean(DocumentsContract.EXTRA_LOADING, true) })
++            fail("An incomplete cursor must not become a successful empty scan")
++        } catch (error: IllegalStateException) { assertTrue(error.message.orEmpty().contains("still loading")) }
++    }
++
++    @Test fun providerErrorAbortsScanInsteadOfPublishingMissingFiles() {
++        try {
++            scanIncomplete(Bundle().apply { putString(DocumentsContract.EXTRA_ERROR, "Storage temporarily unavailable") })
++            fail("A provider error must not become a successful empty scan")
++        } catch (error: IllegalStateException) { assertTrue(error.message.orEmpty().contains("temporarily unavailable")) }
++    }
++}
+--- 1.0.0/app/src/test/java/com/lyra/sona/android/RepositoryTest.kt
++++ 1.0.1/app/src/test/java/com/lyra/sona/android/RepositoryTest.kt
+@@ -24,6 +24,8 @@
+     override suspend fun folders(tree: String) = folderState.value.filter { it.tree == tree }
+     override suspend fun clearTracks(tree: String) { trackState.value = trackState.value.filter { it.tree != tree } }
+     override suspend fun clearFolders(tree: String) { folderState.value = folderState.value.filter { it.tree != tree } }
++    override suspend fun clearOtherTracks(tree: String) { trackState.value = trackState.value.filter { it.tree == tree } }
++    override suspend fun clearOtherFolders(tree: String) { folderState.value = folderState.value.filter { it.tree == tree } }
+     override suspend fun insertTracks(tracks: List<Track>) { trackState.value += tracks }
+     override suspend fun insertFolders(folders: List<Folder>) { folderState.value += folders }
+     override suspend fun replace(tree: String, snapshot: LibrarySnapshot) { publications++; super.replace(tree, snapshot) }
+@@ -50,6 +52,7 @@
+         advanceTimeBy(101); runCurrent(); selection.join()
+         assertEquals("new-tree", preferences.tree.value)
+         assertEquals("new", dao.trackState.value.first { it.tree == "new-tree" }.documentId)
++        assertTrue(dao.trackState.value.all { it.tree == "new-tree" })
+     }
+     @Test fun rejectedSelectionPreservesPreviousTreeAndLibrary() = runTest {
+         val source = FakeDocuments(emptyMap()).apply { rejected = true }
+--- 1.0.0/PHONE_TEST_CHECKLIST.md
++++ 1.0.1/PHONE_TEST_CHECKLIST.md
+@@ -30,4 +30,15 @@
+ 
+ ## Report results
+ 
++Version 1.0.1 regressions to check on a phone:
++
++- [ ] With shuffle on, Play next immediately follows the current track; duplicate occurrences, Add to queue, and Move up/down follow the displayed playback order.
++- [ ] Delete another queued file and refresh while listening: the retained current track continues without restarting or losing position. Updated titles/covers appear in Now Playing and system controls.
++- [ ] Switch folders or finish a refresh while the playback service restores: the queue reconciles to the completed selected library.
++- [ ] Finish a repeat-off queue: Play appears and restarts on the first tap. Swipe away ended/failed/paused playback and verify the service stops; playing audio survives swiping away.
++- [ ] Return from notification settings: permission status updates. After repeated denial, Open notification settings remains usable.
++- [ ] Switch folders repeatedly: unused storage grants and old library caches are removed. Cancelling before publication preserves the selected library and its grant.
++- [ ] A temporarily loading/error provider preserves cached tracks; refresh after it becomes ready. Cancel a slow provider scan and verify recovery remains responsive.
++- [ ] After an OS service restart, the visible UI reconnects; background audio and rotation continue to work.
++
+ Record phone model, Android version, storage provider, tested audio formats, first-scan ms, cached cold-launch ms, and any failed checks. Attach `adb logcat -s LyraPerformance LyraDeviceBenchmark` output for timings if possible.
+--- 1.0.0/README.md
++++ 1.0.1/README.md
+@@ -6,13 +6,17 @@
+ 
+ ## Install
+ 
+-Copy `delivery/Lyra-Android-1.0.0-debug.apk` to your phone and open it. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
++Copy `delivery/Lyra-Android-1.0.1-debug.apk` to your phone and open it. It updates the earlier debug build in place. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
+ 
+ On first run, choose `Music` or an allowed subfolder. Android 11+ blocks choosing the internal storage root, certain SD-card roots, and the main `Download` folder. If **Use this folder** is greyed out, enter an allowed subfolder. Lyra explains this before opening the picker. Cancelling leaves the guidance or previous library visible. Rejected selections and failed grants show a recovery action and preserve the previous library.
+ 
+ Each folder's directly contained audio becomes a playlist. **Liked Songs** contains only tracks directly in the selected root; it is not a favorites feature. File discovery accepts audio MIME types or `.mp3`, `.flac`, `.m4a`, `.aac`, `.wav`, `.ogg`, and `.opus` regardless of provider MIME errors, case-insensitively. Codec support still depends on Android/Media3 and the actual file.
+ 
+ Tap a track to play its collection. Track menus provide **Play next** and **Add to queue**. Tap the mini-player to open Now Playing; open Queue there to remove/reorder tracks. Use system volume buttons. Restored sessions start paused. Sudden process death can lose up to two seconds since the last position checkpoint. Seeking and queue/mode changes save immediately.
++
++Queue displays the actual playback order, including shuffle. Play next inserts immediately after the current queue occurrence; Add to queue appends to the playback order. Moving a shuffled item changes the shuffle traversal while preserving the current source. Turning shuffle off restores the underlying playlist order.
++
++When a storage provider reports a loading or failed listing, Lyra preserves the previous library and asks you to refresh after storage is ready. Files with unknown size/modification time are re-read on refresh. Successful folder switches discard old folder caches and release unused grants. Artwork has a 64 MiB eviction budget, with the current cover and just-written image pair protected; deleted covers are collected after library publication. Evicted artwork can be regenerated on refresh.
+ 
+ Settings contains the folder picker, refresh, notification permission action, and latest scan metrics. General notification denial does not gate playback or media-session controls.
+ 
+@@ -29,7 +33,7 @@
+ From this directory on Windows:
+ 
+ ```powershell
+-.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
++.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --max-workers=1
+ ```
+ 
+ macOS/Linux: use `sh ./gradlew` with the same task names. APK output: `app/build/outputs/apk/debug/app-debug.apk`. The wrapper pins Gradle 8.13 and checks the official distribution SHA-256. Versions are pinned in the Gradle build files. The Gradle plugin runs on the installed JDK 21 and produces Java/Kotlin 17 bytecode.
+@@ -37,16 +41,18 @@
+ ## Architecture
+ 
+ - SAF enumeration uses `DocumentsContract` projected cursor queries, never `DocumentFile.listFiles()`.
+-- Metadata work is bounded to four workers. Successful unchanged fingerprints skip metadata IO; failed metadata is retried and candidates remain visible.
++- Metadata work is bounded to four workers. Known, successful unchanged fingerprints with intact artwork skip metadata IO; missing fingerprints, evicted artwork, and failed metadata are retried.
+ - Room holds intrinsic metadata and artwork references. Album artwork fallback is recomputed deterministically so removed donors do not become permanent cached covers.
+ - A successful generation publishes the complete scan transactionally. Failed/cancelled/superseded scans cannot purge the cached library.
+ - Compose observes the cache immediately, independently of background scanning. Media3 owns playback in a foreground `MediaSessionService`; the UI operates a `MediaController`.
++- Repository snapshots read both Room tables transactionally and distinguish loaded empty libraries from startup. Playback combines library state with scan/restoration readiness, removes missing queue occurrences incrementally, and updates metadata without replacing retained sources.
++- Controller connections and position polling follow Activity visibility; foreground playback survives UI disconnection. Visible clients reconnect with bounded retry delays after a service failure.
+ - DataStore stores the selected tree and playback snapshot, including duplicate queue items and shuffle traversal order. Only the app and trusted system controllers may connect to the playback session.
+ - Image decoding uses sampling and bounded 256px thumbnails / 1024px player images. Music files are never copied or edited.
+ 
+ ## Verification and performance
+ 
+-See `verification/REPORT.md`, `verification/synthetic-benchmark.json`, and `PHONE_TEST_CHECKLIST.md`. Build success and host tests do **not** verify Android audio playback.
++See `verification/FIXES_2026-10-04.md` for version 1.0.1 fixes and checks, `verification/REPORT.md` for historical version 1.0.0 verification, and `PHONE_TEST_CHECKLIST.md` for phone checks. Build success and host tests do **not** verify Android audio playback.
+ 
+ The synthetic 5,000-track host benchmark uses the production scan orchestrator with fake document listings, fake metadata, and an in-memory cache. Its cache-ready time is not Room startup or Android second-launch time. Run only that benchmark with:
+ 
+--- 1.0.0/verification/package-source.py
++++ 1.0.1/verification/package-source.py
+@@ -1,9 +1,11 @@
+ """Package the independent Android source without local SDK paths, caches, fixtures or keys."""
+ from pathlib import Path
+ from zipfile import ZipFile, ZIP_DEFLATED
++import re
+ 
+ root = Path(__file__).resolve().parents[1]
+-destination = root / "delivery" / "Lyra-Android-1.0.0-source.zip"
++version = re.search(r'versionName\s*=\s*"([^"]+)"', (root / "app/build.gradle.kts").read_text()).group(1)
++destination = root / "delivery" / f"Lyra-Android-{version}-source.zip"
+ destination.parent.mkdir(exist_ok=True)
+ excluded_directories = {".gradle", ".kotlin", "build", "delivery", "fixtures", "__pycache__"}
+ with ZipFile(destination, "w", compression=ZIP_DEFLATED) as archive:

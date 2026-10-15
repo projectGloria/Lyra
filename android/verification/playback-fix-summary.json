@@ -1,0 +1,85 @@
+{
+  "versionName": "1.0.2",
+  "versionCode": 3,
+  "checks": {
+    "tests": 46,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lintErrors": 0,
+  "lintWarnings": 26,
+  "build": "successful",
+  "productionControllerRegression": "failed before fix; passed after fix",
+  "apk": {
+    "file": "Lyra-Android-1.0.2-debug.apk",
+    "bytes": 25326688,
+    "sha256": "12e670a0e63625cbc27aeaefd523e1b3299aea9254318e6fb29a0654e9ca3545"
+  },
+  "signerSha256": "d386b8dcdd01885bd6e82e02b3bcc20f2635215f4e8d851c6f986e6b85d4457f",
+  "sameSignerAsPreviousBuild": true,
+  "alignment": "passed",
+  "desktop": {
+    "checkedFiles": 47,
+    "changedFiles": 0,
+    "changes": [],
+    "excludedGeneratedDirectories": [
+      "node_modules",
+      "src-tauri/target"
+    ]
+  },
+  "deviceTestsRun": false,
+  "audiblePlaybackVerified": false,
+  "testSuites": [
+    {
+      "name": "com.lyra.sona.android.AndroidPersistenceTest",
+      "tests": 4,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.LibraryTest",
+      "tests": 10,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.Media3QueueTest",
+      "tests": 5,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.OnboardingUiTest",
+      "tests": 2,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.PlaybackPolicyTest",
+      "tests": 6,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.PlaybackServiceRegressionTest",
+      "tests": 5,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.PlayerControlsTest",
+      "tests": 1,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.ProviderRegressionTest",
+      "tests": 6,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.RepositoryTest",
+      "tests": 6,
+      "failures": 0
+    },
+    {
+      "name": "com.lyra.sona.android.SyntheticBenchmarkTest",
+      "tests": 1,
+      "failures": 0
+    }
+  ]
+}

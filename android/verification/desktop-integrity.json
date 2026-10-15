@@ -1,0 +1,9 @@
+{
+  "checkedFiles": 47,
+  "changedFiles": 0,
+  "changes": [],
+  "excludedGeneratedDirectories": [
+    "node_modules",
+    "src-tauri/target"
+  ]
+}

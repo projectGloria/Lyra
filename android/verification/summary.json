@@ -1,0 +1,43 @@
+{
+  "tests": 29,
+  "testFailures": 0,
+  "lintErrors": 0,
+  "lintWarnings": 25,
+  "assembleDebug": "passed",
+  "assembleDebugAndroidTest": "passed",
+  "apkSha256": "a201679358471f0df3aaa67f3c904cdee94d9811a165b45095095f4391c254f1",
+  "apkBytes": 26837912,
+  "minSdk": 26,
+  "compileSdk": 36,
+  "targetSdk": 36,
+  "applicationId": "com.lyra.sona.android",
+  "permissions": [
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.WAKE_LOCK",
+    "com.lyra.sona.android.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+  ],
+  "desktopIntegrity": {
+    "checkedFiles": 47,
+    "changedFiles": 0,
+    "changes": [],
+    "excludedGeneratedDirectories": [
+      "node_modules",
+      "src-tauri/target"
+    ]
+  },
+  "hostBenchmark": {
+    "environment": "Host JVM 21.0.12.1 / Windows 11 amd64",
+    "kind": "synthetic-host-only",
+    "tracks": 5000,
+    "firstSyntheticScanMs": 640.057,
+    "cachedInMemoryLibraryReadyMs": 2.8831,
+    "secondSyntheticScanMs": 119,
+    "firstMetadataReads": 5000,
+    "secondMetadataReads": 0,
+    "secondReused": 5000,
+    "limitations": "Fake document provider and metadata; in-memory cache reconstruction. Not SAF IO, audio decoding, Room startup, Android launch, or phone performance."
+  },
+  "deviceTests": "not run: no device or emulator connected"
+}

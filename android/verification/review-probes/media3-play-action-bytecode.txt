@@ -1,0 +1,49 @@
+
+>   public static boolean handlePlayButtonAction(androidx.media3.common.Player);
+      Code:
+         0: aload_0
+         1: ifnonnull     6
+         4: iconst_0
+         5: ireturn
+         6: aload_0
+         7: invokeinterface #1749,  1         // InterfaceMethod androidx/media3/common/Player.getPlaybackState:()I
+        12: istore_1
+        13: iconst_0
+        14: istore_2
+        15: iload_1
+        16: iconst_1
+        17: if_icmpne     41
+        20: aload_0
+        21: iconst_2
+        22: invokeinterface #1752,  2         // InterfaceMethod androidx/media3/common/Player.isCommandAvailable:(I)Z
+        27: ifeq          41
+        30: aload_0
+        31: invokeinterface #1770,  1         // InterfaceMethod androidx/media3/common/Player.prepare:()V
+        36: iconst_1
+        37: istore_2
+        38: goto          64
+        41: iload_1
+        42: iconst_4
+        43: if_icmpne     64
+        46: aload_0
+        47: iconst_4
+        48: invokeinterface #1752,  2         // InterfaceMethod androidx/media3/common/Player.isCommandAvailable:(I)Z
+        53: ifeq          64
+        56: aload_0
+        57: invokeinterface #1773,  1         // InterfaceMethod androidx/media3/common/Player.seekToDefaultPosition:()V
+        62: iconst_1
+        63: istore_2
+        64: aload_0
+        65: iconst_1
+        66: invokeinterface #1752,  2         // InterfaceMethod androidx/media3/common/Player.isCommandAvailable:(I)Z
+        71: ifeq          82
+        74: aload_0
+        75: invokeinterface #1776,  1         // InterfaceMethod androidx/media3/common/Player.play:()V
+        80: iconst_1
+        81: istore_2
+        82: iload_2
+        83: ireturn
+  
+    public static boolean handlePauseButtonAction(androidx.media3.common.Player);
+      Code:
+

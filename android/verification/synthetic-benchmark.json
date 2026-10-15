@@ -1,0 +1,12 @@
+{
+  "environment": "Host JVM 21.0.12.1 / Windows 11 amd64",
+  "kind": "synthetic-host-only",
+  "tracks": 5000,
+  "firstSyntheticScanMs": 333.3899,
+  "cachedInMemoryLibraryReadyMs": 3.0902,
+  "secondSyntheticScanMs": 87,
+  "firstMetadataReads": 5000,
+  "secondMetadataReads": 0,
+  "secondReused": 5000,
+  "limitations": "Fake document provider and metadata; in-memory cache reconstruction. Not SAF IO, audio decoding, Room startup, Android launch, or phone performance."
+}

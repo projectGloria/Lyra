@@ -1,0 +1,54 @@
+{
+  "version": "1.0.1",
+  "versionCode": 2,
+  "tests": 45,
+  "testFailures": 0,
+  "lintErrors": 0,
+  "lintWarnings": 26,
+  "apkSha256": "ad574071598e1e6605521a200bd79f47755f65c89cb416bc95d45bb9322a8bc4",
+  "apkBytes": 25326688,
+  "deviceTests": "Not run: no connected phone or emulator",
+  "fixedReviewFindings": 9,
+  "suites": [
+    {
+      "name": "com.lyra.sona.android.AndroidPersistenceTest",
+      "tests": 4
+    },
+    {
+      "name": "com.lyra.sona.android.LibraryTest",
+      "tests": 10
+    },
+    {
+      "name": "com.lyra.sona.android.Media3QueueTest",
+      "tests": 5
+    },
+    {
+      "name": "com.lyra.sona.android.OnboardingUiTest",
+      "tests": 2
+    },
+    {
+      "name": "com.lyra.sona.android.PlaybackPolicyTest",
+      "tests": 6
+    },
+    {
+      "name": "com.lyra.sona.android.PlaybackServiceRegressionTest",
+      "tests": 4
+    },
+    {
+      "name": "com.lyra.sona.android.PlayerControlsTest",
+      "tests": 1
+    },
+    {
+      "name": "com.lyra.sona.android.ProviderRegressionTest",
+      "tests": 6
+    },
+    {
+      "name": "com.lyra.sona.android.RepositoryTest",
+      "tests": 6
+    },
+    {
+      "name": "com.lyra.sona.android.SyntheticBenchmarkTest",
+      "tests": 1
+    }
+  ]
+}

@@ -1,77 +1,22 @@
 {
-  "name": "lyra-music-player",
-  "version": "3.0.0",
-  "description": "Lyra - classic compact music player",
-  "author": "Machine",
-  "main": "main.js",
+  "name": "lyrav2_tauri",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "test": "node --test tests/*.test.cjs"
   },
-  "build": {
-    "appId": "com.lyra.musicplayer",
-    "productName": "Lyra",
-    "directories": {
-      "output": "dist"
-    },
-    "fileAssociations": [
-      {
-        "ext": [
-          "mp3",
-          "flac",
-          "wav",
-          "ogg",
-          "m4a",
-          "aac",
-          "opus",
-          "wma"
-        ],
-        "name": "Audio File",
-        "description": "Audio File",
-        "role": "Viewer",
-        "icon": "assets/icon.ico"
-      }
-    ],
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "assets/icon.ico"
-    },
-    "mac": {
-      "category": "public.app-category.music"
-    },
-    "linux": {
-      "target": "AppImage",
-      "mimeTypes": [
-        "audio/mpeg",
-        "audio/flac",
-        "audio/wav",
-        "audio/ogg",
-        "audio/mp4",
-        "audio/aac",
-        "audio/opus",
-        "audio/x-ms-wma"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "perMachine": false
-    }
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.6.3"
   },
   "dependencies": {
-    "discord-rpc": "^4.0.1",
-    "music-metadata": "^11.13.0"
-  },
-  "devDependencies": {
-    "electron": "^42.4.1",
-    "electron-builder": "^26.15.3"
-  },
-  "overrides": {
-    "rimraf": "^4.0.0",
-    "glob": "^13.0.0"
+    "@tauri-apps/api": "^1.6.0"
   }
 }

@@ -1,0 +1,150 @@
+--- 1.0.1/app/build.gradle.kts
++++ 1.0.2/app/build.gradle.kts
+@@ -11,8 +11,8 @@
+         applicationId = "com.lyra.sona.android"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 2
+-        versionName = "1.0.1"
++        versionCode = 3
++        versionName = "1.0.2"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+     buildFeatures { compose = true; buildConfig = true }
+--- 1.0.1/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
++++ 1.0.2/app/src/main/java/com/lyra/sona/android/playback/PlaybackService.kt
+@@ -82,15 +82,16 @@
+         }
+         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+         session = MediaSession.Builder(this, player).setSessionActivity(activity).setSessionExtras(Bundle().apply { putBoolean("ready", false) }).setCallback(object : MediaSession.Callback {
+-            override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
++            override fun onConnectAsync(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.ConnectionResult> {
+                 val own = controller.packageName == packageName && controller.isPackageNameVerified
+-                if (!own && !controller.isTrusted) return MediaSession.ConnectionResult.reject()
+-                val base = super.onConnect(session, controller)
+-                val commands = base.availableSessionCommands.buildUpon()
++                if (!own && !controller.isTrusted) return Futures.immediateFuture(MediaSession.ConnectionResult.reject())
++                // Media3 1.11's synchronous default is a sentinel with empty commands.
++                // Grant commands explicitly after authenticating the controller.
++                val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                 if (own) { commands.add(QueueCommands.enqueue); commands.add(QueueCommands.move) }
+-                return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+-                    .setAvailablePlayerCommands(base.availablePlayerCommands)
+-                    .setAvailableSessionCommands(commands.build()).build()
++                return Futures.immediateFuture(MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
++                    .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
++                    .setAvailableSessionCommands(commands.build()).build())
+             }
+             override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo,
+                 customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+--- 1.0.1/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
++++ 1.0.2/app/src/test/java/com/lyra/sona/android/PlaybackServiceRegressionTest.kt
+@@ -6,6 +6,12 @@
+ import android.os.Bundle
+ import android.os.Process
+ import android.content.Intent
++import android.content.ComponentName
++import android.os.Looper
++import androidx.lifecycle.ViewModelStore
++import androidx.media3.common.Player
++import androidx.media3.session.MediaController
++import com.lyra.sona.android.ui.LyraViewModel
+ import com.lyra.sona.android.playback.QueueCommands
+ import com.lyra.sona.android.playback.shuffleIndices
+ import androidx.media3.exoplayer.source.ShuffleOrder
+@@ -43,6 +49,47 @@
+         return impl.javaClass.getDeclaredField("callback").apply { isAccessible = true }.get(impl) as MediaSession.Callback
+     }
+ 
++    @Test fun appCanStartASongThroughTheProductionServiceConnection() = runTest {
++        val app = ApplicationProvider.getApplicationContext<LyraApplication>()
++        val source = FakeDocuments(emptyMap())
++        val repository = LibraryRepository(MemoryDao(), MemoryPreferences(), source,
++            ScanEngine(source, MetadataSource { _, _, _, _ -> error("unused") }), backgroundScope)
++        val song = track(audio("song"))
++        field(repository, "snapshot", MutableStateFlow(LibrarySnapshot(listOf(song), tree = "tree", loaded = true)))
++        field(app, "library\$delegate", lazyOf(repository))
++        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
++        // Binding is replaced only in the ViewModel; this controller uses the production session and callback.
++        shadowOf(app).declareComponentUnbindable(ComponentName(app, PlaybackService::class.java))
++        val model = LyraViewModel(app)
++        val store = ViewModelStore().apply { put("model", model) }
++        model.setUiActive(false)
++        val future = MediaController.Builder(app, session(service).token).buildAsync()
++        fun awaitCondition(message: String, condition: () -> Boolean) {
++            val deadline = System.nanoTime() + 3_000_000_000L
++            while (!condition() && System.nanoTime() < deadline) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(5) }
++            assertTrue(message, condition())
++        }
++        try {
++            awaitCondition("Controller must connect to the production session") { future.isDone }
++            val controller = future.get()
++            awaitCondition("Restoration must publish readiness") { controller.sessionExtras.getBoolean("ready") }
++            for (command in listOf(Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_PREPARE, Player.COMMAND_PLAY_PAUSE,
++                Player.COMMAND_SEEK_TO_MEDIA_ITEM)) {
++                assertTrue("App must receive player command $command", controller.isCommandAvailable(command))
++            }
++            assertTrue(controller.availableSessionCommands.contains(QueueCommands.enqueue))
++            field(model, "controller", controller)
++            model.javaClass.getDeclaredMethod("updatePlayer", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(model, true)
++            assertTrue(model.playback.value.ready)
++            model.play(listOf(song))
++            awaitCondition("Play request must reach ExoPlayer") { player(service).mediaItemCount == 1 && player(service).playWhenReady }
++            assertEquals(song.id, player(service).currentMediaItem?.mediaId)
++            assertEquals(song.uri, player(service).currentMediaItem?.localConfiguration?.uri.toString())
++        } finally {
++            store.clear(); MediaController.releaseFuture(future); service.onDestroy()
++        }
++    }
++
+     @Test fun customQueueCommandsUseCurrentServiceQueueAndRejectOtherPackages() = runTest {
+         Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+         val app = ApplicationProvider.getApplicationContext<LyraApplication>()
+@@ -65,7 +112,8 @@
+             fun controller(packageName: String) = MediaSession.ControllerInfo.createTestOnlyControllerInfo(packageName,
+                 Process.myUid(), 1, 1, 1, false, Bundle.EMPTY, true)
+             val own = controller(app.packageName)
+-            assertTrue(callback.onConnect(session, own).availableSessionCommands.contains(QueueCommands.enqueue))
++            assertTrue(callback.onConnectAsync(session, own).get().availableSessionCommands.contains(QueueCommands.enqueue))
++            assertFalse(callback.onConnectAsync(session, controller("other.app")).get().isAccepted)
+             val args = Bundle().apply { putStringArrayList("ids", arrayListOf(next.id, next.id)); putBoolean("next", true) }
+             assertEquals(SessionResult.RESULT_ERROR_PERMISSION_DENIED, callback.onCustomCommand(session, controller("other.app"), QueueCommands.enqueue, args).get().resultCode)
+             assertEquals(3, player.mediaItemCount)
+--- 1.0.1/README.md
++++ 1.0.2/README.md
+@@ -6,7 +6,7 @@
+ 
+ ## Install
+ 
+-Copy `delivery/Lyra-Android-1.0.1-debug.apk` to your phone and open it. It updates the earlier debug build in place. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
++Copy `delivery/Lyra-Android-1.0.2-debug.apk` to your phone and open it. It updates the earlier debug build in place. Allow installation from the file manager you use when Android asks. This APK uses a development signing key; it is intended for direct testing, not Play Store publication.
+ 
+ On first run, choose `Music` or an allowed subfolder. Android 11+ blocks choosing the internal storage root, certain SD-card roots, and the main `Download` folder. If **Use this folder** is greyed out, enter an allowed subfolder. Lyra explains this before opening the picker. Cancelling leaves the guidance or previous library visible. Rejected selections and failed grants show a recovery action and preserve the previous library.
+ 
+@@ -52,7 +52,7 @@
+ 
+ ## Verification and performance
+ 
+-See `verification/FIXES_2026-10-04.md` for version 1.0.1 fixes and checks, `verification/REPORT.md` for historical version 1.0.0 verification, and `PHONE_TEST_CHECKLIST.md` for phone checks. Build success and host tests do **not** verify Android audio playback.
++See `verification/PLAYBACK_FIX_2026-10-04.md` for the version 1.0.2 playback regression fix, `verification/FIXES_2026-10-04.md` for version 1.0.1 fixes and checks, `verification/REPORT.md` for historical version 1.0.0 verification, and `PHONE_TEST_CHECKLIST.md` for phone checks. Build success and host tests do **not** verify Android audio playback.
+ 
+ The synthetic 5,000-track host benchmark uses the production scan orchestrator with fake document listings, fake metadata, and an in-memory cache. Its cache-ready time is not Room startup or Android second-launch time. Run only that benchmark with:
+ 
+--- 1.0.1/PHONE_TEST_CHECKLIST.md
++++ 1.0.2/PHONE_TEST_CHECKLIST.md
+@@ -30,7 +30,14 @@
+ 
+ ## Report results
+ 
+-Version 1.0.1 regressions to check on a phone:
++Version 1.0.2 playback fix to check on a phone:
++
++- Install the update over 1.0.1; verify the selected folder and library are retained.
++- Tap a track after a cold launch. Verify audible playback and advancing progress.
++- Pause/resume, select another track, seek, and use Play next/Add to queue.
++- Background the app, use notification controls, then reopen it and select another song.
++
++Version 1.0.1 regressions also to check on a phone:
+ 
+ - [ ] With shuffle on, Play next immediately follows the current track; duplicate occurrences, Add to queue, and Move up/down follow the displayed playback order.
+ - [ ] Delete another queued file and refresh while listening: the retained current track continues without restarting or losing position. Updated titles/covers appear in Now Playing and system controls.
