@@ -18,6 +18,10 @@ pub fn defaults() -> Value {
         "backgroundPath": "",
         "profilePath": "",
         "showInk": false,
+        "surfaceOpacity": 70,
+        "surfaceBlur": 16,
+        "backgroundBlur": 0,
+        "linkBlur": false,
         "closeToTray": false,
         "accentColor": "#c9a94a",
         "theme": "lyra",
@@ -25,7 +29,9 @@ pub fn defaults() -> Value {
         "layoutVersion": 1,
         "libraryView": "list",
         "leftSidebarWidth": 280,
-        "rightSidebarWidth": 286
+        "rightSidebarWidth": 286,
+        "shortcuts": {},
+        "globalShortcuts": {}
     })
 }
 

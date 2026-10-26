@@ -3,7 +3,9 @@
 mod artwork;
 mod cache;
 mod diagnostics;
+mod global_shortcuts;
 mod library_delta;
+mod liked;
 mod model;
 mod opener;
 mod playlist;
@@ -313,6 +315,39 @@ fn edit_track_metadata(
     Ok(result)
 }
 
+// --- liked songs ---------------------------------------------------------------------
+
+#[tauri::command(async)]
+fn read_liked(state: tauri::State<AppState>) -> Result<Vec<String>, String> {
+    liked::read_liked(&configured_root(&state)?)
+}
+
+#[tauri::command(async)]
+fn set_track_liked(
+    state: tauri::State<AppState>,
+    track_path: String,
+    liked: bool,
+) -> Result<Vec<String>, String> {
+    // Shares the playlist lock: a folder rename remaps this file under the same lock.
+    let _guard = state
+        .playlist_lock
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    liked::set_track_liked(&configured_root(&state)?, &track_path, liked)
+}
+
+#[tauri::command(async)]
+fn reorder_liked(
+    state: tauri::State<AppState>,
+    paths: Option<Vec<String>>,
+) -> Result<Vec<String>, String> {
+    let _guard = state
+        .playlist_lock
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    liked::reorder_liked(&configured_root(&state)?, &paths.unwrap_or_default())
+}
+
 // --- queue ---------------------------------------------------------------------------
 
 /// The native dialog owns authorization for the export destination.
@@ -362,6 +397,13 @@ fn export_queue(window: tauri::Window, tracks: Vec<QueueTrack>) -> Result<Value,
     Ok(json!({ "ok": true, "filePath": path_string(&target) }))
 }
 
+/// Re-registers every system-wide hotkey from `{ actionId: binding }` and returns
+/// `{ actionId: reason }` for the ones the OS refused, so the UI can flag them.
+#[tauri::command(async)]
+fn set_global_shortcuts(app: tauri::AppHandle, bindings: Value) -> Value {
+    Value::Object(global_shortcuts::apply(&app, &bindings))
+}
+
 // --- shell / diagnostics --------------------------------------------------------------
 
 // Programmatic window.close() bypasses CloseRequested in Tauri 1, so custom
@@ -384,6 +426,16 @@ fn minimize_window(window: tauri::Window, state: tauri::State<AppState>) -> Resu
         window.minimize()
     }
     .map_err(|error| error.to_string())
+}
+
+/// The fullscreen player is a page overlay; this makes the window itself fullscreen so it
+/// covers the taskbar. Rust-side, so the JS allowlist stays closed. Leaving fullscreen
+/// restores the window's previous (maximized or normal) placement.
+#[tauri::command(async)]
+fn set_window_fullscreen(window: tauri::Window, fullscreen: bool) -> Result<(), String> {
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|error| error.to_string())
 }
 
 /// Reveals a path in the file manager, but only inside the configured music library.
@@ -513,6 +565,9 @@ fn main() {
             edit_playlist,
             reorder_playlist,
             edit_track_metadata,
+            read_liked,
+            set_track_liked,
+            reorder_liked,
             export_queue,
             reveal_in_explorer,
             report_info,
@@ -520,6 +575,8 @@ fn main() {
             log_event,
             close_window,
             minimize_window,
+            set_window_fullscreen,
+            set_global_shortcuts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lyra");

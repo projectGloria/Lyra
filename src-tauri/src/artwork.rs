@@ -36,7 +36,11 @@ impl ArtworkIndex {
         for path in changes.iter().map(Path::new) {
             if !crate::util::is_audio(path) {
                 if let Some(parent) = path.parent() {
-                    index.directories.lock().unwrap().remove(parent);
+                    index
+                        .directories
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(parent);
                 }
             }
         }

@@ -12,7 +12,18 @@ function load(names, context) {
     assert.ok(start >= 0, name);
     return renderer.slice(start, renderer.indexOf('\n}\n', start) + 2);
   }).join('\n');
-  vm.runInNewContext(source, context);
+  vm.runInNewContext(source, withLikeDefaults(context));
+  return context;
+}
+// Liked-songs globals the extracted functions now reference. Only fills names a test did
+// not provide, so per-test fakes still win.
+function withLikeDefaults(context) {
+  const defaults = {
+    likedReferencePaths: [],
+    setLikedReferences(paths) { context.likedReferencePaths = paths; },
+    getLikedTracks: () => context.state?.library?.likedSongs || []
+  };
+  for (const [key, value] of Object.entries(defaults)) if (!(key in context)) context[key] = value;
   return context;
 }
 const song = (id) => ({ id, path: `C:\\Music\\${id}.mp3`, url: `https://asset.localhost/${id}`, title: id });

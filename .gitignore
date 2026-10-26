@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Rust / Tauri build output (src-tauri/.gitignore covers its own target too)
+target/
+src-tauri/gen/
+*.pdb
+
+# Logs and debug output
+*.log
+npm-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local Claude Code settings (shared project settings stay tracked)
+.claude/settings.local.json

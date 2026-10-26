@@ -22,8 +22,9 @@
       </button>
       <label class="global-search " for="globalSearch">
         <span class="search-glyph"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.2" /><path d="m16 16 4.5 4.5" /></svg></span>
-        <input id="globalSearch" type="search" placeholder="What do you want to play?" autocomplete="off" />
+        <input id="globalSearch" type="search" placeholder="What do you want to play?" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="searchSuggest" aria-expanded="false" />
         <button class="search-clear" data-action="clear-search" aria-label="Clear search"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+        <div id="searchSuggest" class="search-suggest" role="listbox" aria-label="Search suggestions" hidden></div>
       </label>
       <div class="topbar-actions ">
         <button class="view-toggle" type="button" data-view="grid" aria-pressed="false" aria-label="Grid view" title="Grid view"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg></button>
@@ -82,63 +83,162 @@
 
   <div id="settingsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <section class="settings-modal glass-panel">
-      <div class="modal-heading">
-          <div><span class="eyebrow">LYRA CONTROL ROOM</span><h2 id="settingsTitle">Options</h2></div>
-        <button class="icon-button small" data-action="close-settings" aria-label="Close settings"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
-      </div>
-      <div class="settings-grid">
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Music library</strong><span>Your current directory is shown here. Every folder with audio becomes a playlist, while root-level tracks appear in Liked Songs.</span></div>
-          <div class="settings-row"><span id="settingsLibraryPath" class="settings-value">No folder selected</span><span class="settings-actions"><button class="secondary-button compact" data-action="reveal-library" disabled>Show in Explorer</button><button class="secondary-button compact" data-action="choose-library">Choose folder</button></span></div>
+      <nav class="settings-nav" aria-label="Options sections">
+        <h2 id="settingsTitle" class="settings-nav-title">Options</h2>
+        <div class="settings-tabs" role="tablist" aria-orientation="vertical">
+          <button id="settingsTab-general" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settingsPane-general" data-action="settings-tab" data-settings-tab="general"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z" /></svg><span>General</span></button>
+          <button id="settingsTab-appearance" class="settings-tab" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settingsPane-appearance" data-action="settings-tab" data-settings-tab="appearance"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.8-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8h2.1A4.3 4.3 0 0 0 21 10.6C21 6.4 17 3 12 3Z" /><circle cx="7.5" cy="11.5" r="1" /><circle cx="10.5" cy="7.5" r="1" /><circle cx="15.5" cy="8" r="1" /></svg><span>Appearance</span></button>
+          <button id="settingsTab-shortcuts" class="settings-tab" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settingsPane-shortcuts" data-action="settings-tab" data-settings-tab="shortcuts"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14h9" /></svg><span>Shortcuts</span></button>
+          <button id="settingsTab-global" class="settings-tab" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settingsPane-global" data-action="settings-tab" data-settings-tab="global"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span>Global shortcuts</span></button>
+          <button id="settingsTab-advanced" class="settings-tab" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settingsPane-advanced" data-action="settings-tab" data-settings-tab="advanced"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3.5 17.2a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4Z" /></svg><span>Advanced</span></button>
         </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Background artwork</strong><span>Choose a picture from your computer. It is saved locally for the next launch.</span></div>
-          <div class="settings-row"><span id="settingsBackgroundPath" class="settings-value">Use the selected theme background</span><span class="settings-actions"><button class="secondary-button compact" data-action="choose-background">Choose picture</button><button id="removeBackgroundButton" class="secondary-button compact danger-button" data-action="remove-background" disabled>Remove</button></span></div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Profile picture</strong><span>Choose a local image for the profile avatar in the top navigation.</span></div>
-          <div class="settings-row profile-settings-row"><div class="profile-setting-value"><span id="settingsProfilePreview" class="profile-preview">N</span><span id="settingsProfilePath" class="settings-value">Use initials</span></div><span class="settings-actions"><button class="secondary-button compact" data-action="choose-profile">Choose picture</button><button id="removeProfileButton" class="secondary-button compact danger-button" data-action="remove-profile" disabled>Remove</button></span></div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Ink in water</strong><span>Sound becomes color. Flowing ink blooms with the bass and curls with the melody behind your music. Off by default.</span></div>
-          <label class="switch-row" for="inkToggle"><span>Sound-reactive background</span><input id="inkToggle" type="checkbox" /><span class="switch"><span></span></span></label>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Minimize to tray</strong><span>Keep music playing in the notification area when the window is minimized or closed.</span></div>
-          <label class="switch-row" for="closeToTrayToggle"><span>Minimize or close to tray</span><input id="closeToTrayToggle" type="checkbox" /><span class="switch"><span></span></span></label>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Interface theme</strong><span>Choose a complete color mood for the app. Your selection is saved for the next launch.</span></div>
-          <div class="theme-grid" role="group" aria-label="Interface theme presets">
-            <button class="theme-option" type="button" data-theme-id="lyra" aria-label="Lyra Gold theme"><span class="theme-preview theme-preview-lyra"></span><span>Lyra Gold</span></button>
-            <button class="theme-option" type="button" data-theme-id="aurora" aria-label="Aurora Glass theme"><span class="theme-preview theme-preview-aurora"></span><span>Aurora Glass</span></button>
-            <button class="theme-option" type="button" data-theme-id="midnight" aria-label="Midnight Black theme"><span class="theme-preview theme-preview-midnight"></span><span>Midnight Black</span></button>
-            <button class="theme-option" type="button" data-theme-id="ember" aria-label="Ember Red theme"><span class="theme-preview theme-preview-ember"></span><span>Ember Red</span></button>
-            <button class="theme-option" type="button" data-theme-id="violet" aria-label="Violet Night theme"><span class="theme-preview theme-preview-violet"></span><span>Violet Night</span></button>
-            <button class="theme-option" type="button" data-theme-id="forest" aria-label="Forest Neon theme"><span class="theme-preview theme-preview-forest"></span><span>Forest Neon</span></button>
-            <button class="theme-option" type="button" data-theme-id="rose" aria-label="Rose Noir theme"><span class="theme-preview theme-preview-rose"></span><span>Rose Noir</span></button>
-          </div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Accent color</strong><span>Choose the highlight color used across Lyra controls, sliders, and active states.</span></div>
-          <div class="accent-controls">
-            <div class="accent-swatches" role="group" aria-label="Accent color presets">
-              <button class="accent-swatch" type="button" data-accent-color="#62f2d3" style="--swatch:#62f2d3" aria-label="Cyan"></button>
-              <button class="accent-swatch" type="button" data-accent-color="#a77bff" style="--swatch:#a77bff" aria-label="Violet"></button>
-              <button class="accent-swatch" type="button" data-accent-color="#ec78ea" style="--swatch:#ec78ea" aria-label="Pink"></button>
-              <button class="accent-swatch" type="button" data-accent-color="#f5c15c" style="--swatch:#f5c15c" aria-label="Gold"></button>
-              <button class="accent-swatch" type="button" data-accent-color="#71e08b" style="--swatch:#71e08b" aria-label="Green"></button>
-              <button class="accent-swatch" type="button" data-accent-color="#f4fbff" style="--swatch:#f4fbff" aria-label="White"></button>
+        <p class="settings-nav-note">Changes save automatically.</p>
+      </nav>
+
+      <div class="settings-content">
+        <header class="settings-content-header">
+          <h3 id="settingsPaneTitle">General</h3>
+          <button class="icon-button small" type="button" data-action="close-settings" aria-label="Close options"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+        </header>
+        <div class="settings-scroll">
+
+          <section id="settingsPane-general" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-general">
+            <div class="settings-group">
+              <h4 class="settings-group-title">Library</h4>
+              <div class="settings-card">
+                <div class="settings-item">
+                  <div class="settings-item-copy">
+                    <strong>Music folder</strong>
+                    <span>Every folder with audio becomes a playlist. Tracks in the root folder appear in Liked Songs.</span>
+                    <span id="settingsLibraryPath" class="settings-value settings-path">No folder selected</span>
+                  </div>
+                  <div class="settings-item-control"><button class="secondary-button compact" type="button" data-action="reveal-library" disabled>Show in Explorer</button><button class="secondary-button compact" type="button" data-action="choose-library">Change folder</button></div>
+                </div>
+              </div>
             </div>
-            <label class="accent-picker" for="accentColorPicker"><span>Custom</span><input id="accentColorPicker" type="color" value="#62f2d3" /></label>
-          </div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-copy"><strong>Diagnostic reports</strong><span>Lyra continuously records app events, playback transitions, scans, settings, and errors locally. Reports rotate automatically and home and music-library paths are masked; review reports before sharing.</span></div>
-          <div class="settings-row"><span id="settingsReportPath" class="settings-value">Reports are stored in Lyra's app data folder</span><span class="settings-actions"><button class="secondary-button compact" data-action="open-reports">Open report folder</button></span></div>
+            <div class="settings-group">
+              <h4 class="settings-group-title">Profile</h4>
+              <div class="settings-card">
+                <div class="settings-item">
+                  <div class="settings-item-copy settings-profile-copy">
+                    <span id="settingsProfilePreview" class="profile-preview">N</span>
+                    <span class="settings-item-copy"><strong>Profile picture</strong><span id="settingsProfilePath" class="settings-value">Use initials</span></span>
+                  </div>
+                  <div class="settings-item-control"><button class="secondary-button compact" type="button" data-action="choose-profile">Choose picture</button><button id="removeProfileButton" class="secondary-button compact danger-button" type="button" data-action="remove-profile" disabled>Remove</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h4 class="settings-group-title">Window</h4>
+              <div class="settings-card">
+                <label class="settings-item switch-row" for="closeToTrayToggle">
+                  <span class="settings-item-copy"><strong>Minimize to tray</strong><span>Closing or minimizing hides Lyra in the notification area and keeps the music playing.</span></span>
+                  <input id="closeToTrayToggle" type="checkbox" /><span class="switch"><span></span></span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section id="settingsPane-appearance" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-appearance" hidden>
+            <div class="settings-group">
+              <h4 class="settings-group-title">Theme</h4>
+              <div class="settings-card">
+                <div class="theme-grid" role="group" aria-label="Interface theme presets">
+                  <button class="theme-option" type="button" data-theme-id="lyra" aria-label="Lyra Gold theme"><span class="theme-preview theme-preview-lyra"></span><span>Lyra Gold</span></button>
+                  <button class="theme-option" type="button" data-theme-id="aurora" aria-label="Aurora Glass theme"><span class="theme-preview theme-preview-aurora"></span><span>Aurora Glass</span></button>
+                  <button class="theme-option" type="button" data-theme-id="midnight" aria-label="Midnight Black theme"><span class="theme-preview theme-preview-midnight"></span><span>Midnight Black</span></button>
+                  <button class="theme-option" type="button" data-theme-id="ember" aria-label="Ember Red theme"><span class="theme-preview theme-preview-ember"></span><span>Ember Red</span></button>
+                  <button class="theme-option" type="button" data-theme-id="violet" aria-label="Violet Night theme"><span class="theme-preview theme-preview-violet"></span><span>Violet Night</span></button>
+                  <button class="theme-option" type="button" data-theme-id="forest" aria-label="Forest Neon theme"><span class="theme-preview theme-preview-forest"></span><span>Forest Neon</span></button>
+                  <button class="theme-option" type="button" data-theme-id="rose" aria-label="Rose Noir theme"><span class="theme-preview theme-preview-rose"></span><span>Rose Noir</span></button>
+                </div>
+                <div class="settings-item">
+                  <div class="settings-item-copy"><strong>Accent color</strong><span>Highlights controls, sliders and active states.</span></div>
+                  <div class="settings-item-control accent-controls">
+                    <div class="accent-swatches" role="group" aria-label="Accent color presets">
+                      <button class="accent-swatch" type="button" data-accent-color="#62f2d3" style="--swatch:#62f2d3" aria-label="Cyan"></button>
+                      <button class="accent-swatch" type="button" data-accent-color="#a77bff" style="--swatch:#a77bff" aria-label="Violet"></button>
+                      <button class="accent-swatch" type="button" data-accent-color="#ec78ea" style="--swatch:#ec78ea" aria-label="Pink"></button>
+                      <button class="accent-swatch" type="button" data-accent-color="#f5c15c" style="--swatch:#f5c15c" aria-label="Gold"></button>
+                      <button class="accent-swatch" type="button" data-accent-color="#71e08b" style="--swatch:#71e08b" aria-label="Green"></button>
+                      <button class="accent-swatch" type="button" data-accent-color="#f4fbff" style="--swatch:#f4fbff" aria-label="White"></button>
+                    </div>
+                    <label class="accent-picker" for="accentColorPicker" title="Custom color"><input id="accentColorPicker" type="color" value="#62f2d3" aria-label="Custom accent color" /></label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h4 class="settings-group-title">Background</h4>
+              <div class="settings-card">
+                <div class="settings-item">
+                  <div class="settings-item-copy">
+                    <strong>Background picture</strong>
+                    <span>Shown behind the whole app instead of the theme background.</span>
+                    <span id="settingsBackgroundPath" class="settings-value settings-path">Use the selected theme background</span>
+                  </div>
+                  <div class="settings-item-control"><button class="secondary-button compact" type="button" data-action="choose-background">Choose picture</button><button id="removeBackgroundButton" class="secondary-button compact danger-button" type="button" data-action="remove-background" disabled>Remove</button></div>
+                </div>
+                <div id="surfaceControls" class="settings-item is-disabled" data-surface-row>
+                  <div class="settings-item-copy"><strong>Glass panels</strong><span id="surfaceControlsHint">Choose a background picture to adjust its panels.</span></div>
+                  <div class="settings-item-control surface-sliders">
+                    <label class="surface-slider"><span>Opacity</span><input class="range" type="range" min="0" max="100" step="1" value="70" data-surface-setting="surfaceOpacity" aria-label="Panel opacity" disabled /><output data-surface-readout="surfaceOpacity">70%</output></label>
+                    <label class="surface-slider"><span>Blur</span><input class="range" type="range" min="0" max="40" step="1" value="16" data-surface-setting="surfaceBlur" aria-label="Panel blur" disabled /><output data-surface-readout="surfaceBlur">16px</output></label>
+                  </div>
+                </div>
+                <div class="settings-item is-disabled" data-surface-row>
+                  <div class="settings-item-copy"><strong>Picture blur</strong><span>Softens the background picture itself.</span></div>
+                  <div class="settings-item-control surface-sliders">
+                    <button class="blur-link" type="button" data-action="toggle-blur-link" aria-pressed="false" title="Keep picture blur and panel blur the same" disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg><span>Same as panels</span></button>
+                    <label class="surface-slider"><span>Blur</span><input class="range" type="range" min="0" max="40" step="1" value="0" data-surface-setting="backgroundBlur" aria-label="Picture blur" disabled /><output data-surface-readout="backgroundBlur">0px</output></label>
+                  </div>
+                </div>
+                <label class="settings-item switch-row" for="inkToggle">
+                  <span class="settings-item-copy"><strong>Ink in water</strong><span>A sound-reactive background: ink blooms with the bass and curls with the melody.</span></span>
+                  <input id="inkToggle" type="checkbox" /><span class="switch"><span></span></span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section id="settingsPane-shortcuts" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-shortcuts" hidden>
+            <div class="settings-group">
+              <div class="settings-group-header">
+                <div><h4 class="settings-group-title">Inside Lyra</h4><p class="settings-group-hint">Click a shortcut, then press a key, a combination or a mouse button (middle, back, forward or side buttons). Esc cancels. Ignored while typing in a text field.</p></div>
+                <button class="secondary-button compact" type="button" data-action="reset-shortcuts">Reset to defaults</button>
+              </div>
+              <div id="shortcutList" class="settings-card shortcut-list" role="group" aria-label="Keyboard and mouse shortcuts"></div>
+            </div>
+          </section>
+
+          <section id="settingsPane-global" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-global" hidden>
+            <div class="settings-group">
+              <div class="settings-group-header">
+                <div><h4 class="settings-group-title">System-wide</h4><p class="settings-group-hint">Work even when Lyra is in the background or in the tray. Use Ctrl, Alt, Shift or Win with a key (for example Ctrl + Alt + M), or an F-key or media key. Red means another app already uses it.</p></div>
+                <button class="secondary-button compact" type="button" data-action="clear-global-shortcuts">Clear all</button>
+              </div>
+              <div id="globalShortcutList" class="settings-card shortcut-list" role="group" aria-label="Global keyboard shortcuts"></div>
+            </div>
+          </section>
+
+          <section id="settingsPane-advanced" class="settings-pane" role="tabpanel" aria-labelledby="settingsTab-advanced" hidden>
+            <div class="settings-group">
+              <h4 class="settings-group-title">Diagnostics</h4>
+              <div class="settings-card">
+                <div class="settings-item">
+                  <div class="settings-item-copy">
+                    <strong>Diagnostic reports</strong>
+                    <span>Lyra logs app events, playback, scans, settings and errors locally. Reports rotate automatically and home and library paths are masked. Review a report before sharing it.</span>
+                    <span id="settingsReportPath" class="settings-value settings-path">Reports are stored in Lyra's app data folder</span>
+                  </div>
+                  <div class="settings-item-control"><button class="secondary-button compact" type="button" data-action="open-reports">Open folder</button></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
         </div>
       </div>
-      <div class="modal-footer"><span class="muted">Changes save automatically.</span><button class="primary-button" data-action="close-settings">Done</button></div>
     </section>
   </div>
 

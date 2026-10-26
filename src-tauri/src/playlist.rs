@@ -352,7 +352,15 @@ pub fn edit_playlist(
     let mut warning = String::new();
     let actual_folder = if renaming {
         match std::fs::rename(&folder, &target) {
-            Ok(()) => target,
+            Ok(()) => {
+                // Likes are stored as root-relative paths; follow the folder to its new name.
+                if let Err(error) = crate::liked::remap_folder(root_path, &folder, &target) {
+                    warning = format!(
+                        "Playlist renamed, but liked songs inside it could not be updated: {error}"
+                    );
+                }
+                target
+            }
             Err(error) => {
                 warning =
                     format!("Playlist details saved, but the folder could not be renamed: {error}");

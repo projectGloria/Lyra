@@ -13,6 +13,7 @@ tauri-build = { version = "1.5", features = [] }
 [dependencies]
 tauri = { version = "1.6", features = [
   "dialog-message",
+  "global-shortcut",
   "system-tray",
   "dialog-open",
   "dialog-save",

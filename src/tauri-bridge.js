@@ -88,6 +88,7 @@ window.spotfck = {
   minimize: () => invoke('minimize_window'),
   maximize: () => appWindow.toggleMaximize(),
   close: () => invoke('close_window'),
+  setFullscreen: (fullscreen) => invoke('set_window_fullscreen', { fullscreen: Boolean(fullscreen) }).catch(() => {}),
 
   chooseLibrary: async () => {
     const selected = await open({ directory: true, multiple: false, title: 'Choose Music Library' });
@@ -142,6 +143,22 @@ window.spotfck = {
     };
   },
 
+  // System-wide hotkeys. Resolves to `{ actionId: reason }` for bindings the OS refused.
+  setGlobalShortcuts: (bindings = {}) => invoke('set_global_shortcuts', { bindings }).catch(() => ({})),
+
+  onGlobalShortcut: (callback) => {
+    let unlisten = null;
+    let cancelled = false;
+    listen('shortcut:global', (event) => callback(event.payload)).then((stop) => {
+      if (cancelled) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  },
+
   reportEvent: (event, details = {}, level = 'info') => {
     invoke('log_event', { event, details, level }).catch(() => {});
   },
@@ -174,6 +191,12 @@ window.spotfck = {
       folderPath: payload.folderPath,
       paths: payload.paths || []
     }),
+
+  // Likes for tracks outside the root live in `.lyra-liked.json` at the library root; each
+  // call returns the full, authoritative list of liked paths after the change.
+  readLiked: () => invoke('read_liked').catch(() => []),
+  setTrackLiked: (trackPath, liked) => invoke('set_track_liked', { trackPath, liked: Boolean(liked) }),
+  reorderLiked: (paths = []) => invoke('reorder_liked', { paths }),
 
   editTrackMetadata: async (payload = {}) => {
     const artworkChanged = Boolean(payload.artworkChanged || payload.artworkSourcePath || payload.removeArtwork);

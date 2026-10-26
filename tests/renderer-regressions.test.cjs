@@ -11,7 +11,18 @@ function load(names, context) {
     assert.ok(start >= 0, name);
     return source.slice(start, source.indexOf('\n}\n', start) + 2);
   });
-  vm.runInNewContext(functions.join('\n'), context);
+  vm.runInNewContext(functions.join('\n'), withLikeDefaults(context));
+  return context;
+}
+// Liked-songs globals the extracted functions now reference. Only fills names a test did
+// not provide, so per-test fakes still win.
+function withLikeDefaults(context) {
+  const defaults = {
+    likedReferencePaths: [],
+    setLikedReferences(paths) { context.likedReferencePaths = paths; },
+    getLikedTracks: () => context.state?.library?.likedSongs || []
+  };
+  for (const [key, value] of Object.entries(defaults)) if (!(key in context)) context[key] = value;
   return context;
 }
 const ids = (tracks) => Array.from(tracks, (track) => track.id).join('');
@@ -512,7 +523,7 @@ test('Previous and Next retrace consumed queue songs and their playlist anchors'
 test('search mounts a virtual collection and keeps a displayed song in the tab order', () => {
   const tracks = Array.from({ length: 50000 }, (_, i) => ({ ...track(String(i)), title: 'Song ' + i, _searchText: 'song' }));
   let mounted;
-  const app = load(['renderSearchView', 'uniqueByLabel', 'searchEntityGroupMarkup', 'albumIdentity'], {
+  const app = load(['renderSearchView', 'uniqueByLabel', 'searchEntityGroupMarkup', 'albumIdentity', 'searchTokens', 'matchesTokens', 'trackSearchText'], {
     state: { query: 'song', library: { folders: [] }, searchShowAllSongs: true, focusedTrackId: 'missing' },
     getAllTracks: () => tracks, getAlbumCollections: () => [], getArtworkForTrack: () => '',
     artMarkup: () => '', iconMarkup: () => '', escapeHtml: String,
@@ -529,6 +540,37 @@ test('search mounts a virtual collection and keeps a displayed song in the tab o
   app.renderSearchView(container);
   assert.equal(mounted.length, 8);
   assert.equal(app.state.focusedTrackId, '0');
+});
+
+test('a paused current row shows frozen bars, never the pause glyph the dock uses for "playing"', () => {
+  const app = load(['trackNumberMarkup'], {
+    state: { currentTrack: { id: 'a' } }, audio: { paused: true },
+    EQUALIZER_MARKUP: '<eq>', EQUALIZER_PAUSED_MARKUP: '<eq paused>'
+  });
+  assert.equal(app.trackNumberMarkup({ id: 'a' }, 0), '<eq paused>');
+  assert.equal(app.trackNumberMarkup({ id: 'b' }, 4), '5');
+  app.audio.paused = false;
+  assert.equal(app.trackNumberMarkup({ id: 'a' }, 0), '<eq>');
+});
+
+test('search suggestions token-match across fields and rank name matches first', () => {
+  const songs = [
+    { ...track('s1', 'Hensonn'), title: 'Sahara - Slowed' },
+    { ...track('s2', 'Hensonn'), title: 'Galaxy' },
+    { ...track('s3', 'Other'), title: 'Into the Galaxy' }
+  ];
+  const app = load(['getSearchSuggestions', 'searchTokens', 'matchesTokens', 'trackSearchText', 'suggestNameRank'], {
+    state: { library: { folders: [{ id: 'p1', name: 'Galaxy Hensonn', tracks: [] }] } },
+    getAllTracks: () => songs, getAlbumCollections: () => [],
+    SUGGEST_KIND_ORDER: { track: 0, artist: 1, album: 2, playlist: 3 }
+  });
+  const label = (item) => `${item.kind}:${item.label || item.playlist?.name || item.track.title}`;
+  // Both words must match somewhere, so "Into the Galaxy" by Other is out.
+  assert.equal(app.getSearchSuggestions('hensonn galaxy').map(label).join('|'), 'track:Galaxy|playlist:Galaxy Hensonn');
+  // Exact title beats word-start; the artist entry beats a song that only matched via its artist field.
+  assert.equal(app.getSearchSuggestions('galaxy').map(label).join('|'), 'track:Galaxy|playlist:Galaxy Hensonn|track:Into the Galaxy');
+  assert.equal(label(app.getSearchSuggestions('hensonn')[0]), 'artist:Hensonn');
+  assert.equal(app.getSearchSuggestions('   ').length, 0);
 });
 
 test('a successful tag edit advances the delta baseline only when its base matches', async () => {
@@ -588,4 +630,233 @@ test('restoring a session after Previous preserves its forward queue history', (
   assert.equal(app.getNextTrack().id, 'C');
   app.nextTrack();
   assert.equal(app.state.currentTrack.id, 'C');
+});
+
+// --- shortcuts & liked songs ----------------------------------------------------------
+// The action table and its lookup maps are top-level consts, so evaluate that block as-is
+// rather than re-declaring it here and letting the two drift apart.
+function shortcutApp(extra = {}) {
+  const start = source.indexOf('// --- shortcuts');
+  const end = source.indexOf('function getShortcutBindings(');
+  assert.ok(start >= 0 && end > start);
+  const calls = [];
+  const context = {
+    state: { settings: { shortcuts: {} }, fullscreenView: false, consecutivePlaybackErrors: 0 },
+    document: { activeElement: null, querySelector: () => null, getElementById: () => null },
+    audio: { volume: 0.5 },
+    calls, togglePlay: () => calls.push('togglePlay'), seekBy: (s) => calls.push(`seek:${s}`),
+    nextTrack: () => calls.push('next'), previousTrack: () => calls.push('previous'),
+    setVolume() {}, revealFullscreenVolume() {}, toggleMute() {}, toggleTrackLike: () => calls.push('like'),
+    toggleShuffleMode() {}, toggleFullscreenView: () => calls.push('fullscreen'), navigateHistory: (d) => calls.push(`nav:${d}`),
+    setFullscreenView() {}, persistSettings: () => calls.push('persist'), showToast: (m) => calls.push(`toast:${m}`),
+    escapeHtml: (v) => String(v), iconMarkup: () => '',
+    hotkeys: [], window: { spotfck: { setGlobalShortcuts: async (b) => { context.hotkeys.push(b); return context.hotkeyErrors || {}; } } },
+    ...extra
+  };
+  // `let` bindings in the block are script-scoped, so expose the ones tests need to poke.
+  vm.runInNewContext(`${source.slice(start, end)}\nthis.SHORTCUT_ACTIONS = SHORTCUT_ACTIONS;
+this.captureState = () => shortcutCapture; this.globalErrors = () => globalShortcutErrors; this.settled = () => globalShortcutSync;`, context);
+  return load(['getShortcutBindings', 'rebuildShortcutLookup', 'shortcutModifierPrefix', 'keyboardShortcutBinding',
+    'mouseShortcutBinding', 'formatShortcut', 'isTextEntryElement', 'isModalOpen', 'shortcutAllowedHere',
+    'runShortcutAction', 'handleShortcutKeydown', 'handleShortcutMouse', 'setShortcutOverrides', 'assignShortcut',
+    'renderShortcutSettings', 'renderShortcutList', 'cycleRepeatMode', 'isGlobalShortcutCandidate', 'syncGlobalShortcuts',
+    'handleGlobalShortcut', 'startShortcutCapture', 'cancelShortcutCapture'], context);
+}
+const key = (code, extra = {}) => ({ code, key: code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, repeat: false,
+  defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra });
+
+test('bindings use physical codes with ordered modifiers, and mouse buttons map to MouseN', () => {
+  const app = shortcutApp();
+  assert.equal(app.keyboardShortcutBinding(key('KeyK', { ctrlKey: true, shiftKey: true })), 'Ctrl+Shift+KeyK');
+  assert.equal(app.keyboardShortcutBinding(key('ShiftLeft', { shiftKey: true })), '', 'a lone modifier is not a binding');
+  assert.equal(app.keyboardShortcutBinding(key('', { key: 'MediaPlayPause' })), 'MediaPlayPause');
+  assert.equal(app.mouseShortcutBinding({ button: 3 }), 'Mouse4');
+  assert.equal(app.mouseShortcutBinding({ button: 1, altKey: true }), 'Alt+Mouse2');
+  assert.equal(app.mouseShortcutBinding({ button: 0 }), '', 'left click stays a click');
+  assert.equal(app.mouseShortcutBinding({ button: 2 }), '', 'right click stays a context menu');
+  assert.equal(app.formatShortcut('Ctrl+ArrowRight'), 'Ctrl + →');
+  assert.equal(app.formatShortcut('Mouse4'), 'Mouse back');
+  assert.equal(app.formatShortcut('Mouse7'), 'Mouse 7');
+  assert.equal(app.formatShortcut(''), 'Not set');
+});
+
+test('Space toggles playback even when a button or slider has focus, but still types in text fields', () => {
+  const app = shortcutApp();
+  app.rebuildShortcutLookup();
+  for (const focused of [{ tagName: 'BUTTON' }, { tagName: 'INPUT', type: 'range' }, { tagName: 'INPUT', type: 'checkbox' }, null]) {
+    app.calls.length = 0;
+    app.document.activeElement = focused && { ...focused, closest: () => null };
+    const event = key('Space');
+    assert.equal(app.handleShortcutKeydown(event), true);
+    assert.equal(event.defaultPrevented, true, 'the focused control must not also activate');
+    assert.deepEqual(app.calls, ['togglePlay']);
+  }
+  app.calls.length = 0;
+  app.document.activeElement = { tagName: 'INPUT', type: 'search', closest: () => null };
+  const typing = key('Space');
+  assert.equal(app.handleShortcutKeydown(typing), false);
+  assert.equal(typing.defaultPrevented, false);
+  assert.deepEqual(app.calls, []);
+});
+
+test('held keys repeat only for repeatable actions', () => {
+  const app = shortcutApp();
+  app.rebuildShortcutLookup();
+  const held = key('Space', { repeat: true });
+  assert.equal(app.handleShortcutKeydown(held), true);
+  assert.equal(held.defaultPrevented, true);
+  assert.deepEqual(app.calls, [], 'auto-repeat must not machine-gun play/pause');
+  app.handleShortcutKeydown(key('ArrowRight', { repeat: true }));
+  assert.deepEqual(app.calls, ['seek:5']);
+});
+
+test('rebinding steals the input from its previous action and persists only overrides', () => {
+  const app = shortcutApp();
+  app.rebuildShortcutLookup();
+  app.assignShortcut('nextTrack', 'Space');
+  assert.equal(app.state.settings.shortcuts.nextTrack, 'Space');
+  assert.equal(app.state.settings.shortcuts.togglePlay, '');
+  assert.ok(app.calls.includes('persist'));
+  app.calls.length = 0;
+  app.handleShortcutKeydown(key('Space'));
+  assert.deepEqual(app.calls, ['next']);
+});
+
+test('mouse back/forward are bound by default and never fall through to webview history', () => {
+  const app = shortcutApp();
+  app.rebuildShortcutLookup();
+  const down = { type: 'mousedown', button: 3, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  app.handleShortcutMouse(down);
+  assert.equal(down.defaultPrevented, true);
+  assert.deepEqual(app.calls, ['nav:-1']);
+  app.setShortcutOverrides({ navigateForward: '' });
+  app.calls.length = 0;
+  const up = { type: 'mouseup', button: 4, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+  app.handleShortcutMouse(up);
+  assert.equal(up.defaultPrevented, true, 'unbound forward is still swallowed');
+  assert.ok(!app.calls.some((call) => call.startsWith('nav:')));
+});
+
+test('global shortcuts require a modifier unless F-key or media key, and never take mouse buttons', () => {
+  const app = shortcutApp();
+  for (const ok of ['Ctrl+Alt+KeyM', 'Shift+Space', 'F9', 'MediaPlayPause', 'AudioVolumeUp']) assert.equal(app.isGlobalShortcutCandidate(ok), true, ok);
+  for (const bad of ['KeyM', 'Space', 'ArrowRight', 'F13', 'Mouse4', 'Ctrl+Mouse5', '']) assert.equal(app.isGlobalShortcutCandidate(bad), false, bad);
+});
+
+test('assigning a global shortcut is stored apart from in-app ones and registered with the OS', async () => {
+  const app = shortcutApp();
+  app.rebuildShortcutLookup();
+  app.assignShortcut('togglePlay', 'KeyM', 'global');
+  assert.deepEqual(app.state.settings.globalShortcuts, undefined, 'a bare letter is refused');
+  app.assignShortcut('togglePlay', 'Ctrl+Alt+KeyM', 'global');
+  app.assignShortcut('toggleFullscreen', 'Ctrl+Alt+KeyF', 'global');
+  assert.deepEqual({ ...app.state.settings.globalShortcuts }, { togglePlay: 'Ctrl+Alt+KeyM' }, 'non-playback actions cannot be global');
+  assert.deepEqual({ ...app.state.settings.shortcuts }, {}, 'in-app bindings are untouched');
+  await app.settled();
+  assert.equal(app.hotkeys.at(-1).togglePlay, 'Ctrl+Alt+KeyM');
+  assert.equal(app.hotkeys.at(-1).nextTrack, '', 'nothing is global by default');
+  app.handleGlobalShortcut('togglePlay');
+  app.handleGlobalShortcut('nextTrack');
+  app.handleGlobalShortcut('toggleFullscreen');
+  assert.deepEqual(app.calls.filter((c) => !c.startsWith('toast') && c !== 'persist'), ['togglePlay'], 'only bound global actions run');
+});
+
+test('recording releases every hotkey so the chord reaches the recorder, then restores them', async () => {
+  const app = shortcutApp();
+  app.state.settings.globalShortcuts = { nextTrack: 'Ctrl+Alt+ArrowRight' };
+  app.startShortcutCapture('togglePlay', 'global');
+  await app.settled();
+  assert.deepEqual({ ...app.hotkeys.at(-1) }, {});
+  app.handleGlobalShortcut('nextTrack');
+  assert.ok(!app.calls.includes('next'), 'a hotkey must not fire mid-recording');
+  app.cancelShortcutCapture();
+  await app.settled();
+  assert.equal(app.hotkeys.at(-1).nextTrack, 'Ctrl+Alt+ArrowRight');
+});
+
+test('chords the OS refuses are reported once, not on every re-sync', async () => {
+  const app = shortcutApp({ hotkeyErrors: { togglePlay: 'Already in use by another app.' } });
+  app.state.settings.globalShortcuts = { togglePlay: 'Ctrl+Alt+KeyM' };
+  await app.syncGlobalShortcuts();
+  await app.syncGlobalShortcuts();
+  assert.equal(app.globalErrors().togglePlay, 'Already in use by another app.');
+  assert.equal(app.calls.filter((c) => c.startsWith('toast:Global shortcut unavailable')).length, 1);
+});
+
+test('glass panel settings are clamped and fall back to defaults on junk from settings.json', () => {
+  const limits = source.match(/const SURFACE_LIMITS = (\{[^\n]*\});/);
+  assert.ok(limits, 'SURFACE_LIMITS is declared on one line');
+  const app = load(['surfaceSetting'], { state: { settings: {} }, SURFACE_LIMITS: vm.runInNewContext(`(${limits[1]})`) });
+  const read = (key, value) => { app.state.settings[key] = value; return app.surfaceSetting(key); };
+  assert.equal(read('surfaceOpacity', 45), 45);
+  assert.equal(read('surfaceOpacity', 140), 100);
+  assert.equal(read('surfaceOpacity', -5), 0);
+  assert.equal(read('surfaceOpacity', '62.6'), 63);
+  for (const junk of ['abc', '', null, undefined]) assert.equal(read('surfaceOpacity', junk), 70, String(junk));
+  assert.equal(read('surfaceBlur', 99), 40);
+  assert.equal(read('surfaceBlur', undefined), 16);
+  assert.equal(read('backgroundBlur', undefined), 0, 'the picture is sharp by default');
+});
+
+test('linked blurs move together from either slider; unlinked they are independent', () => {
+  const constant = (name) => vm.runInNewContext(`(${source.match(new RegExp(`const ${name} = ([^;\\n]*);`))[1]})`);
+  const app = load(['surfaceSetting', 'setSurfaceSetting', 'toggleBlurLink'], {
+    state: { settings: { surfaceBlur: 20, backgroundBlur: 4, linkBlur: false } },
+    SURFACE_LIMITS: constant('SURFACE_LIMITS'), BLUR_SETTINGS: constant('BLUR_SETTINGS'),
+    applySurfaceStyle() {}, renderSurfaceControls() {}, persistSettings() {}
+  });
+  const blurs = () => [app.state.settings.surfaceBlur, app.state.settings.backgroundBlur];
+  app.setSurfaceSetting('backgroundBlur', 9);
+  assert.deepEqual(blurs(), [20, 9]);
+  app.toggleBlurLink();
+  assert.deepEqual(blurs(), [20, 20], 'linking snaps the picture to the panel blur');
+  app.setSurfaceSetting('backgroundBlur', 7);
+  assert.deepEqual(blurs(), [7, 7]);
+  app.setSurfaceSetting('surfaceOpacity', 30);
+  assert.deepEqual(blurs(), [7, 7], 'opacity is never part of the link');
+  app.toggleBlurLink();
+  app.setSurfaceSetting('surfaceBlur', 12);
+  assert.deepEqual(blurs(), [12, 7]);
+});
+
+test('In playlist card names the track\'s folder playlist, or Liked Songs for root tracks', () => {
+  const folderTracks = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const contexts = { b: { queue: folderTracks, libraryId: 'f1' }, r: { queue: [{ id: 'r' }], libraryId: 'liked' } };
+  const app = load(['renderPlaylistContextCard'], {
+    state: { library: { likedSongsArtworkUrl: '' } },
+    findTrackContext: (id) => contexts[id] || null,
+    getFolderById: (id) => (id === 'f1' ? { id: 'f1', name: 'Half- Life <Vibes>', artworkUrl: 'cover.jpg' } : null),
+    getPathLabel: () => 'folder', getArtworkForTrack: () => '', artMarkup: (url) => `<img src="${url}">`,
+    escapeHtml: (v) => String(v).replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  });
+  const folderCard = app.renderPlaylistContextCard({ id: 'b' });
+  assert.match(folderCard, /In playlist/);
+  assert.match(folderCard, /Half- Life &lt;Vibes&gt;/, 'playlist names are escaped');
+  assert.match(folderCard, /Song 2 of 3 songs/);
+  assert.match(folderCard, /data-action="open-playlist" data-library-id="f1"/);
+  assert.match(folderCard, /cover\.jpg/);
+  const likedCard = app.renderPlaylistContextCard({ id: 'r' });
+  assert.match(likedCard, /Liked Songs/);
+  assert.match(likedCard, /Song 1 of 1 song</);
+  assert.equal(app.renderPlaylistContextCard({ id: 'missing' }), '', 'unknown tracks render no card');
+});
+
+const BACKSLASH = String.fromCharCode(92);
+const win = (path) => path.replaceAll('/', BACKSLASH);
+test('Liked Songs is root files followed by resolved references, without duplicates', () => {
+  const rootA = { id: 'a', path: win('C:/Music/a.mp3') };
+  const elsewhere = { id: 'b', path: win('C:/Music/Album/b.mp3') };
+  const app = load(['trackPathKey', 'setLikedReferences', 'getLikedTracks', 'isRootTrack', 'isTrackLiked'], {
+    state: { library: { likedSongs: [rootA] } },
+    tracksByPath: new Map([rootA, elsewhere].map((track) => [track.path.replaceAll(BACKSLASH, '/').toLowerCase(), track])),
+    likedReferencePaths: [], likedReferenceKeys: new Set(), likedTracksCache: null
+  });
+  app.setLikedReferences(['C:/music/album/B.mp3', win('C:/Music/a.mp3'), win('C:/Music/Gone/missing.mp3')]);
+  assert.deepEqual(ids(app.getLikedTracks()), 'ab');
+  assert.equal(app.isTrackLiked(elsewhere), true);
+  assert.equal(app.isRootTrack(elsewhere), false);
+  assert.equal(app.isRootTrack(rootA), true);
+  app.setLikedReferences([]);
+  assert.equal(app.isTrackLiked(elsewhere), false);
+  assert.equal(app.isTrackLiked(rootA), true, 'root files stay liked by location');
 });

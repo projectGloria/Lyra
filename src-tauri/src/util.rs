@@ -16,6 +16,8 @@ pub const IMAGE_EXTENSIONS: &[&str] = &[
 
 pub const PLAYLIST_METADATA_FILE: &str = ".lyra-playlist.json";
 pub const PLAYLIST_COVER_PREFIX: &str = ".lyra-cover";
+/// Root-level list of liked tracks that live in other folders. See `liked.rs`.
+pub const LIKED_SONGS_FILE: &str = ".lyra-liked.json";
 
 pub fn extension_lower(path: &Path) -> String {
     path.extension()
@@ -324,7 +326,7 @@ pub fn is_managed_temporary(name: &str) -> bool {
     };
     let known = matches!(
         target,
-        ".lyra-playlist.json" | "settings.json" | "library-snapshot.json"
+        ".lyra-playlist.json" | ".lyra-liked.json" | "settings.json" | "library-snapshot.json"
     ) || target
         .strip_prefix("track-metadata-cache-v")
         .and_then(|v| v.strip_suffix(".json"))

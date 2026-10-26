@@ -18,7 +18,7 @@ const state = {
   repeatMode: 'off',
   scanning: false,
   scanProgress: { stage: 'validate', label: 'Checking your folder', detail: '', percent: 0, processed: 0, total: 0, folders: 0, tracks: 0 },
-  settings: { libraryPath: '', backgroundPath: '', profilePath: '', showInk: false, closeToTray: false, accentColor: '#c9a94a', theme: 'lyra', paletteVersion: 1, layoutVersion: 1, libraryView: 'list', leftSidebarWidth: 280, rightSidebarWidth: 286 },
+  settings: { libraryPath: '', backgroundPath: '', profilePath: '', showInk: false, surfaceOpacity: 70, surfaceBlur: 16, backgroundBlur: 0, linkBlur: false, closeToTray: false, accentColor: '#c9a94a', theme: 'lyra', paletteVersion: 1, layoutVersion: 1, libraryView: 'list', leftSidebarWidth: 280, rightSidebarWidth: 286, shortcuts: {}, globalShortcuts: {} },
   homeActive: false,
   listQuery: '',
   view: { type: 'playlist', id: 'liked' },
@@ -63,6 +63,7 @@ let fullscreenVolumeHideTimer;
 let fullscreenVolumeVisible = false;
 let volumeBeforeMute = 0.5;
 let contentSearchTimer;
+let searchSuggestIndex = -1;
 let listSearchTimer;
 let libraryChangeTimer;
 let draggedTrackId = '';
@@ -91,6 +92,53 @@ let scanRequestId = 0;
 let activeScanClientId = 0;
 let activeScanPromise = null;
 let modalReturnFocus = null;
+// Likes for tracks outside the root, as absolute paths in the order they were liked. The
+// root folder itself is Liked Songs, so these are references, never copies of audio.
+let likedReferencePaths = [];
+let likedReferenceKeys = new Set();
+let likedTracksCache = null;
+let likeWriteChain = Promise.resolve();
+let likeWritesPending = 0;
+
+function trackPathKey(path) {
+  return String(path || '').replaceAll('\\', '/').toLowerCase();
+}
+
+function setLikedReferences(paths) {
+  likedReferencePaths = Array.isArray(paths) ? paths.map(String) : [];
+  likedReferenceKeys = new Set(likedReferencePaths.map(trackPathKey));
+  likedTracksCache = null;
+}
+
+// Liked Songs is derived, not stored: root files (liked by location) followed by resolved
+// references. Keyed on the root array's identity so a reorder or rescan that swaps
+// `likedSongs` rebuilds it, while every render in between reuses the same array.
+function getLikedTracks() {
+  const rootTracks = state.library.likedSongs || [];
+  if (likedTracksCache?.rootTracks === rootTracks) return likedTracksCache.tracks;
+  const rootKeys = new Set(rootTracks.map((track) => trackPathKey(track.path)));
+  const seen = new Set(rootKeys);
+  const references = [];
+  for (const path of likedReferencePaths) {
+    const key = trackPathKey(path);
+    const track = seen.has(key) ? null : tracksByPath.get(key);
+    if (!track) continue;
+    seen.add(key);
+    references.push(track);
+  }
+  likedTracksCache = { rootTracks, rootKeys, tracks: references.length ? [...rootTracks, ...references] : rootTracks };
+  return likedTracksCache.tracks;
+}
+
+function isRootTrack(track) {
+  if (!track?.path) return false;
+  getLikedTracks();
+  return likedTracksCache.rootKeys.has(trackPathKey(track.path));
+}
+
+function isTrackLiked(track) {
+  return Boolean(track?.path) && (likedReferenceKeys.has(trackPathKey(track.path)) || isRootTrack(track));
+}
 
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -154,6 +202,75 @@ function applyBackground() {
   } else {
     shell.style.removeProperty('--custom-background');
     shell.style.removeProperty('--background-opacity');
+  }
+  applySurfaceStyle();
+}
+
+// Glass panels over a background picture: [min, max, default]. Clamped on read because
+// settings.json is hand-editable and a stray "-5" or "abc" must not break the cascade.
+const SURFACE_LIMITS = { surfaceOpacity: [0, 100, 70], surfaceBlur: [0, 40, 16], backgroundBlur: [0, 40, 0] };
+const BLUR_SETTINGS = ['surfaceBlur', 'backgroundBlur'];
+
+function surfaceSetting(key) {
+  const [min, max, fallback] = SURFACE_LIMITS[key];
+  const raw = state.settings[key];
+  const value = raw === '' || raw === null ? NaN : Number(raw);
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
+}
+
+// Only the variables change; CSS scopes them to `.has-background`, so the solid
+// no-picture surfaces are untouched whatever these are set to.
+function applySurfaceStyle() {
+  const shell = document.getElementById('appShell');
+  if (!shell) return;
+  shell.style.setProperty('--surface-opacity', `${surfaceSetting('surfaceOpacity')}%`);
+  shell.style.setProperty('--surface-blur', `${surfaceSetting('surfaceBlur')}px`);
+  shell.style.setProperty('--background-blur', `${surfaceSetting('backgroundBlur')}px`);
+}
+
+// One write path for the sliders. While the blurs are linked, moving either one moves both,
+// so they can never drift apart through the UI.
+function setSurfaceSetting(key, value) {
+  if (!Object.hasOwn(SURFACE_LIMITS, key)) return;
+  const keys = state.settings.linkBlur && BLUR_SETTINGS.includes(key) ? BLUR_SETTINGS : [key];
+  for (const target of keys) state.settings[target] = Number(value);
+  applySurfaceStyle();
+  renderSurfaceControls();
+}
+
+function toggleBlurLink() {
+  state.settings.linkBlur = !state.settings.linkBlur;
+  // Panels are the reference: linking snaps the picture blur to the panel blur.
+  if (state.settings.linkBlur) state.settings.backgroundBlur = surfaceSetting('surfaceBlur');
+  applySurfaceStyle();
+  renderSurfaceControls();
+  persistSettings();
+}
+
+function renderSurfaceControls() {
+  const rows = [...document.querySelectorAll('[data-surface-row]')];
+  if (!rows.length) return;
+  const enabled = Boolean(String(state.settings.backgroundPath || '').trim());
+  for (const row of rows) row.classList.toggle('is-disabled', !enabled);
+  const hint = document.getElementById('surfaceControlsHint');
+  if (hint) hint.textContent = enabled ? 'How much of the picture shows through the panels.' : 'Choose a background picture to adjust these.';
+  const link = document.querySelector('[data-action="toggle-blur-link"]');
+  if (link) {
+    link.disabled = !enabled;
+    link.classList.toggle('active', Boolean(state.settings.linkBlur));
+    link.setAttribute('aria-pressed', String(Boolean(state.settings.linkBlur)));
+  }
+  for (const [key, [min, max]] of Object.entries(SURFACE_LIMITS)) {
+    const input = document.querySelector(`[data-surface-setting="${key}"]`);
+    const readout = document.querySelector(`[data-surface-readout="${key}"]`);
+    const value = surfaceSetting(key);
+    if (input) {
+      input.disabled = !enabled;
+      // Don't fight the thumb mid-drag: the value is already what the user is holding.
+      if (Number(input.value) !== value) input.value = String(value);
+      input.style.setProperty('--progress', `${((value - min) / (max - min)) * 100}%`);
+    }
+    if (readout) readout.textContent = BLUR_SETTINGS.includes(key) ? `${value}px` : `${value}%`;
   }
 }
 
@@ -359,7 +476,7 @@ function bindArtworkFallbacks() {
 
 function getSelectedItem() {
   if (state.selectedId === 'liked') {
-    return { id: 'liked', name: 'Liked Songs', tracks: state.library.likedSongs || [], artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true };
+    return { id: 'liked', name: 'Liked Songs', tracks: getLikedTracks(), artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true };
   }
   return state.library.folders.find((folder) => folder.id === state.selectedId) || null;
 }
@@ -386,6 +503,9 @@ function applyView(view) {
   if (view.type === 'playlist' && view.id) state.selectedId = view.id;
   const globalSearch = document.getElementById('globalSearch');
   if (globalSearch) globalSearch.value = state.query;
+  // Any navigation (pick, back/forward, home, clear) retires the dropdown.
+  // typeof guard: unit tests extract this function without the dropdown helpers.
+  if (typeof closeSearchSuggest === 'function') closeSearchSuggest();
 }
 
 function snapshotCurrentNavigationState() {
@@ -458,6 +578,7 @@ function getPathLabel(value = '') {
 function normalizeLibrary(library) {
   const normalized = library || { rootPath: '', likedSongs: [], folders: [] };
   albumCollectionsCache = null;
+  likedTracksCache = null;
   libraryFolderIndex = new Map();
   for (const folder of normalized.folders || []) {
     if (folder.path) libraryFolderIndex.set(folder.path, folder);
@@ -517,6 +638,7 @@ function applyLibraryDelta(library, delta) {
   for (const folder of library.folders) { libraryFolderIndex.set(folder.path, folder); libraryFolderIndex.set(folder.id, folder); }
   if (membershipChanged) allTracks = [...tracksById.values()];
   albumCollectionsCache = null;
+  likedTracksCache = null;
   Object.assign(library, { scannedAt: delta.scannedAt, folderCount: delta.folderCount, trackCount: delta.trackCount,
     likedSongsArtworkPath: delta.likedSongsArtworkPath, likedSongsArtworkUrl: delta.likedSongsArtworkUrl || '' });
   if (state.selectedId !== 'liked' && !libraryFolderIndex.has(state.selectedId)) {
@@ -613,13 +735,13 @@ function renderLibrary() {
     return;
   }
   const query = state.libraryQuery.trim().toLowerCase();
-  const liked = state.library.likedSongs || [];
+  const liked = getLikedTracks();
   const showingAlbums = state.libraryFilter === 'albums';
   const activeAlbumKey = state.view?.type === 'album' ? String(state.view.value || '').trim().toLowerCase() : '';
   const collections = showingAlbums
     ? getAlbumCollections().map((album) => ({ ...album, subtitle: `${album.tracks.length} ${album.tracks.length === 1 ? 'song' : 'songs'}` }))
     : [
-      { id: 'liked', name: 'Liked Songs', subtitle: `${liked.length} root tracks`, artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true, tracks: liked },
+      { id: 'liked', name: 'Liked Songs', subtitle: `${liked.length} ${liked.length === 1 ? 'song' : 'songs'}`, artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true, tracks: liked },
       ...(state.library.folders || []).map((folder) => ({ ...folder, subtitle: `${folder.tracks.length} songs` }))
     ];
   document.querySelectorAll('[data-library-filter]').forEach((button) => {
@@ -661,7 +783,7 @@ function renderLibrary() {
 
 function renderHomeView(container) {
   const playlists = [
-    { id: 'liked', name: 'Liked Songs', description: 'Tracks found at the root of your library', tracks: state.library.likedSongs || [], artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true },
+    { id: 'liked', name: 'Liked Songs', description: 'Root folder tracks and songs you liked', tracks: getLikedTracks(), artworkUrl: state.library.likedSongsArtworkUrl || '', isLiked: true },
     ...(state.library.folders || []).map((folder) => ({ ...folder, description: folder.description || '', tracks: folder.tracks || [] }))
   ];
 
@@ -754,15 +876,17 @@ function searchEntityGroupMarkup(title, cards) {
 
 function renderSearchView(container) {
   const rawQuery = state.query.trim();
-  const query = rawQuery.toLowerCase();
+  const tokens = searchTokens(rawQuery);
   const allTracks = getAllTracks();
-  const tracks = query ? allTracks.filter((track) => (track._searchText ?? `${track.title || ''}\n${track.artist || ''}\n${track.album || ''}`.toLowerCase()).includes(query)) : [];
+  // Token AND-match (not one substring) so "hensonn galaxy" finds Galaxy by Hensonn even
+  // though title and artist live in different fields. Same matcher as the dropdown.
+  const tracks = tokens.length ? allTracks.filter((track) => matchesTokens(trackSearchText(track), tokens)) : [];
   state.selectedTracks = tracks;
   const artists = uniqueByLabel(tracks.map((track) => ({ label: track.artist, track }))).slice(0, 8);
   const matchingAlbums = new Set(tracks.map(albumIdentity));
   const albums = getAlbumCollections().filter((album) => matchingAlbums.has(album.value))
     .slice(0, 8).map((album) => ({ label: album.name, track: album.tracks[0] }));
-  const playlists = (state.library.folders || []).filter((folder) => String(folder.name || '').toLowerCase().includes(query) || (folder.tracks || []).some((track) => (track._searchText ?? `${track.title || ''}\n${track.artist || ''}\n${track.album || ''}`.toLowerCase()).includes(query))).slice(0, 8);
+  const playlists = (state.library.folders || []).filter((folder) => matchesTokens(String(folder.name || '').toLowerCase(), tokens) || (folder.tracks || []).some((track) => matchesTokens(trackSearchText(track), tokens))).slice(0, 8);
   const top = tracks[0] || artists[0]?.track || albums[0]?.track;
   const resultCount = tracks.length + artists.length + albums.length + playlists.length;
 
@@ -789,6 +913,133 @@ function renderSearchView(container) {
     ${tracks.length ? `<section class="search-songs-section"><div class="search-songs-header"><h3>Songs</h3>${tracks.length > 8 ? `<button class="secondary-button compact" data-action="toggle-search-all-songs">${state.searchShowAllSongs ? 'Show less' : `Show all (${tracks.length})`}</button>` : ''}</div><div class="search-song-list track-list"><div class="track-header"><span>#</span><span>Title</span><span>Artist</span><span>Album</span><span>◷</span></div><div class="track-virtual-body"></div></div></section>` : ''}` : rawQuery ? `<div class="search-empty"><span>${iconMarkup('search')}</span><h3>No results found</h3><p>Try another song, artist, album or playlist name.</p></div>` : ''}
   </div>`;
   if (displayedTracks.length) mountTrackCollection(container, displayedTracks, 'search');
+}
+
+function searchTokens(query) {
+  return String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function matchesTokens(text, tokens) {
+  return tokens.length > 0 && tokens.every((token) => text.includes(token));
+}
+
+function trackSearchText(track) {
+  return track._searchText ?? `${track.title || ''}\n${track.artist || ''}\n${track.album || ''}`.toLowerCase();
+}
+
+// Lower is better: exact name > prefix > word-start > anywhere > matched only via other fields.
+function suggestNameRank(name, query) {
+  const text = String(name || '').toLowerCase();
+  if (text === query) return 0;
+  if (text.startsWith(query)) return 1;
+  const at = text.indexOf(query);
+  if (at > 0 && /[\s_\-([.]/.test(text[at - 1])) return 2;
+  return at >= 0 ? 3 : 4;
+}
+
+const SUGGEST_KIND_ORDER = { track: 0, artist: 1, album: 2, playlist: 3 };
+
+function getSearchSuggestions(rawQuery, limit = 8) {
+  const tokens = searchTokens(rawQuery);
+  if (!tokens.length) return [];
+  const query = tokens.join(' ');
+  const results = [];
+  const artists = new Map();
+  for (const track of getAllTracks()) {
+    if (matchesTokens(trackSearchText(track), tokens)) results.push({ kind: 'track', rank: suggestNameRank(track.title, query), track });
+    // Artists only exist on tracks, so collect them in the same pass instead of a second full-library scan.
+    const artist = String(track.artist || '').trim();
+    const key = artist.toLowerCase();
+    if (artist && !artists.has(key) && matchesTokens(key, tokens)) artists.set(key, { kind: 'artist', rank: suggestNameRank(artist, query), label: artist, track });
+  }
+  results.push(...artists.values());
+  for (const album of getAlbumCollections()) {
+    if (matchesTokens(album.name.toLowerCase(), tokens)) results.push({ kind: 'album', rank: suggestNameRank(album.name, query), album });
+  }
+  for (const playlist of state.library.folders || []) {
+    if (matchesTokens(String(playlist.name || '').toLowerCase(), tokens)) results.push({ kind: 'playlist', rank: suggestNameRank(playlist.name, query), playlist });
+  }
+  // Array#sort is stable, so equal ranks keep library order within each kind.
+  return results.sort((a, b) => a.rank - b.rank || SUGGEST_KIND_ORDER[a.kind] - SUGGEST_KIND_ORDER[b.kind]).slice(0, limit);
+}
+
+function searchSuggestItemMarkup(item, index) {
+  const wrap = (main, side = '') => `<div class="search-suggest-item" role="option" id="searchSuggest-${index}" aria-selected="false" data-suggest-index="${index}">${main}${side}</div>`;
+  const body = (art, title, meta, round = false) => `<span class="search-suggest-art${round ? ' round' : ''}">${art}</span><span class="search-suggest-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(meta)}</span></span>`;
+  // Main buttons reuse the attributes the document-level click delegate already handles
+  // (data-action / data-entity-type / data-home-library-id), so no new routing exists.
+  if (item.kind === 'track') {
+    const { track } = item;
+    return wrap(
+      `<button type="button" class="search-suggest-main" tabindex="-1" data-action="play-track" data-track-id="${escapeHtml(track.id)}">${body(artMarkup(getArtworkForTrack(track), track.title, 'placeholder-art'), track.title, `Song • ${track.artist || 'Unknown artist'}`)}</button>`,
+      `<button type="button" class="search-suggest-side" tabindex="-1" data-action="add-track-queue" data-track-id="${escapeHtml(track.id)}" aria-label="Add ${escapeHtml(track.title)} to queue" title="Add to queue">${iconMarkup('plus')}</button>`
+    );
+  }
+  if (item.kind === 'artist') {
+    return wrap(`<button type="button" class="search-suggest-main" tabindex="-1" data-entity-type="artist" data-entity-value="${escapeHtml(item.label)}">${body(artMarkup(getArtworkForTrack(item.track), item.label, 'placeholder-art'), item.label, 'Artist', true)}</button>`);
+  }
+  if (item.kind === 'album') {
+    const { album } = item;
+    return wrap(`<button type="button" class="search-suggest-main" tabindex="-1" data-entity-type="album" data-entity-value="${escapeHtml(album.value)}">${body(artMarkup(album.artworkUrl || getArtworkForTrack(album.tracks[0]), album.name, 'placeholder-art'), album.name, album.description ? `Album • ${album.description}` : 'Album')}</button>`);
+  }
+  const { playlist } = item;
+  const count = playlist.tracks?.length || 0;
+  return wrap(`<button type="button" class="search-suggest-main" tabindex="-1" data-home-library-id="${escapeHtml(playlist.id)}">${body(artMarkup(playlist.artworkUrl || getArtworkForTrack(playlist.tracks?.[0]), playlist.name, 'placeholder-art'), playlist.name, `Playlist • ${count} ${count === 1 ? 'song' : 'songs'}`)}</button>`);
+}
+
+function renderSearchSuggest(rawQuery) {
+  const panel = document.getElementById('searchSuggest');
+  const input = document.getElementById('globalSearch');
+  if (!panel || !input) return;
+  const query = String(rawQuery || '').trim();
+  if (!query) return closeSearchSuggest();
+  const items = getSearchSuggestions(query);
+  searchSuggestIndex = -1;
+  // "See all" is a real option so the arrow keys can reach it and Enter on it commits.
+  panel.innerHTML = `${items.length ? items.map(searchSuggestItemMarkup).join('') : `<div class="search-suggest-empty">No matches for “${escapeHtml(query)}”</div>`}<div class="search-suggest-item search-suggest-all" role="option" id="searchSuggest-${items.length}" aria-selected="false" data-suggest-index="${items.length}"><button type="button" class="search-suggest-main" tabindex="-1" data-action="commit-search">${iconMarkup('search')}<span>See all results for “${escapeHtml(query)}”</span></button></div>`;
+  panel.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  input.removeAttribute('aria-activedescendant');
+}
+
+function closeSearchSuggest() {
+  const panel = document.getElementById('searchSuggest');
+  if (!panel || panel.hidden) return;
+  panel.hidden = true;
+  searchSuggestIndex = -1;
+  const input = document.getElementById('globalSearch');
+  input?.setAttribute('aria-expanded', 'false');
+  input?.removeAttribute('aria-activedescendant');
+}
+
+function moveSearchSuggest(step) {
+  const items = [...document.querySelectorAll('#searchSuggest .search-suggest-item')];
+  if (!items.length) return;
+  // Combobox pattern: focus never leaves the input, only the highlighted option moves,
+  // so the user can keep typing mid-navigation.
+  searchSuggestIndex = searchSuggestIndex < 0 && step < 0 ? items.length - 1 : (searchSuggestIndex + step + items.length) % items.length;
+  items.forEach((item, index) => item.setAttribute('aria-selected', String(index === searchSuggestIndex)));
+  const active = items[searchSuggestIndex];
+  active.scrollIntoView({ block: 'nearest' });
+  document.getElementById('globalSearch').setAttribute('aria-activedescendant', active.id);
+}
+
+// Enter (or "See all") commits the query to the full results page.
+function commitSearch(rawQuery) {
+  const query = String(rawQuery || '').trim();
+  closeSearchSuggest();
+  if (!query) return;
+  if (state.view?.type === 'search') {
+    // Already on results: rewrite this history entry instead of stacking one per Enter.
+    state.searchShowAllSongs = false;
+    state.query = query;
+    state.view.query = query;
+    state.navigationHistory[state.navigationIndex] = { ...state.view };
+    renderContent();
+    updateNavigationControls();
+  } else {
+    navigateTo({ type: 'search', query });
+  }
 }
 
 function renderContent() {
@@ -838,7 +1089,7 @@ function renderContent() {
   const playlistIsPlaying = currentIsInSelectedPlaylist && !audio.paused;
   const playlistPlayAction = currentIsInSelectedPlaylist ? 'toggle-play' : 'play-selected';
   const coverUrl = item.artworkUrl || getArtworkForTrack(state.selectedTracks[0]);
-  const subtitle = item.isLiked ? 'Tracks found at the root of your library' : item.description;
+  const subtitle = item.isLiked ? 'Songs in your root folder and songs you liked' : item.description;
   const tracks = filterListTracks(state.selectedTracks);
   container.innerHTML = `
           <div class="content-view" data-library-id="${escapeHtml(item.id)}">
@@ -920,9 +1171,10 @@ function renderVirtualTrackRows(trackList) {
 function updateTrackRowStates() {
   const currentId = state.currentTrack?.id || '';
   const ids = [...new Set([lastCurrentRowId, currentId].filter(Boolean))];
-  for (const id of ids) {
-    const row = document.querySelector(`#contentView .track-row[data-track-id="${id}"]`);
-    if (!row) continue;
+  // querySelectorAll: the same track id can be rendered more than once (e.g. duplicate
+  // library entries), and querySelector would leave the second row stale.
+  for (const row of ids.flatMap((id) => [...document.querySelectorAll(`#contentView .track-row[data-track-id="${CSS.escape(id)}"]`)])) {
+    const id = row.dataset.trackId;
     const isCurrent = row.dataset.trackId === currentId;
     row.classList.toggle('current', isCurrent);
     const number = row.querySelector('.track-number');
@@ -1025,10 +1277,14 @@ function updatePlaybackUi({ trackChanged = false } = {}) {
 // A bar equalizer reads as "this is the one that is playing" far faster than a glyph,
 // and it is pure CSS so recycled virtual rows cost nothing extra to animate.
 const EQUALIZER_MARKUP = '<span class="playing-equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
+const EQUALIZER_PAUSED_MARKUP = '<span class="playing-equalizer is-paused" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
 
 function trackNumberMarkup(track, index) {
   if (state.currentTrack?.id !== track.id) return String(index + 1);
-  return audio.paused ? '<span class="track-number-paused" aria-hidden="true">II</span>' : EQUALIZER_MARKUP;
+  // Paused = the same bars, frozen. The old literal "II" was the *pause* glyph, which
+  // everywhere else (dock, hero, fullscreen) means "playing — click to pause", so a
+  // paused row contradicted the ▶ in the dock.
+  return audio.paused ? EQUALIZER_PAUSED_MARKUP : EQUALIZER_MARKUP;
 }
 
 function renderTrackRow(track, index) {
@@ -1069,10 +1325,28 @@ function renderNowPlaying() {
   const art = getArtworkForTrack(track);
   panel.innerHTML = `
     <div class="now-heading"><h2>Playing now</h2></div>
-    <div class="now-art">${artMarkup(art, track.title, 'placeholder-art')}</div>
+    <div class="now-art-slot"><div class="now-art">${artMarkup(art, track.title, 'placeholder-art')}</div></div>
     <div class="now-title-row"><div><h2>${escapeHtml(track.title)}</h2><button class="text-entity-link" data-entity-type="artist" data-entity-value="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</button></div></div>
     <div class="info-card"><div class="card-heading"><strong>Credits</strong><button type="button" class="text-entity-link" data-action="toggle-credits" aria-expanded="${state.creditsExpanded}">${state.creditsExpanded ? 'Show less' : 'Show all'}</button></div><div class="credit-line"><span>Artist</span><button class="text-entity-link strong" data-entity-type="artist" data-entity-value="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</button></div><div class="credit-line"><span>Album</span><button class="text-entity-link strong" data-entity-type="album" data-entity-value="${escapeHtml(albumIdentity(track))}">${escapeHtml(track.album)}</button></div>${state.creditsExpanded ? creditsDetailMarkup(track) : ''}</div>
+    ${renderPlaylistContextCard(track)}
     <div class="queue-card"><button type="button" class="card-heading queue-heading-button" data-action="queue" aria-label="Open queue"><strong>Up next</strong><span>${state.queue.length ? `${state.queue.length} queued` : 'Open queue'}</span></button>${renderQueueItem()}</div>`;
+}
+
+// The playlist is derived from the track's folder (a folder *is* a playlist; root files are
+// Liked Songs), not from what was clicked, so it stays right after queue jumps, restores and
+// rescans without another piece of playback state to keep in sync.
+function renderPlaylistContextCard(track) {
+  const context = findTrackContext(track.id);
+  if (!context) return '';
+  const isLiked = context.libraryId === 'liked';
+  const folder = isLiked ? null : getFolderById(context.libraryId);
+  const name = isLiked ? 'Liked Songs' : folder?.name || getPathLabel(track.folderPath);
+  const tracks = context.queue || [];
+  const position = tracks.findIndex((candidate) => candidate.id === track.id) + 1;
+  const artworkUrl = (isLiked ? state.library.likedSongsArtworkUrl : folder?.artworkUrl) || '';
+  const art = artMarkup(artworkUrl || getArtworkForTrack(tracks[0]), name, 'placeholder-art', artworkUrl ? getArtworkForTrack(tracks[0]) : '');
+  const count = `${tracks.length} ${tracks.length === 1 ? 'song' : 'songs'}`;
+  return `<div class="queue-card playlist-context-card"><button type="button" class="card-heading queue-heading-button" data-action="open-playlist" data-library-id="${escapeHtml(context.libraryId)}" aria-label="Open ${escapeHtml(name)}"><strong>In playlist</strong><span>Open playlist</span></button><button type="button" class="queue-item queue-item-button" data-action="open-playlist" data-library-id="${escapeHtml(context.libraryId)}" aria-label="Open ${escapeHtml(name)}"><span class="queue-art">${art}</span><span class="queue-copy"><strong>${escapeHtml(name)}</strong><span>${position > 0 ? `Song ${position} of ${count}` : count}</span></span></button></div>`;
 }
 
 function renderQueueItem() {
@@ -1186,8 +1460,83 @@ function addTrackToQueue(track) {
   return true;
 }
 
+function likeButtonMarkup(track) {
+  const liked = isTrackLiked(track);
+  // Root files are liked by *where they live*; the heart is shown filled but cannot unlike
+  // them, because that would mean moving the user's file.
+  const label = liked && isRootTrack(track) ? 'In your Liked Songs folder' : liked ? 'Remove from Liked Songs' : 'Save to Liked Songs';
+  return `<button type="button" class="dock-like-button${liked ? ' liked' : ''}" data-action="toggle-like" aria-pressed="${liked}" aria-label="${label}" title="${label}">${iconMarkup('heart')}</button>`;
+}
+
 function dockTrackMarkup(track) {
-  return `<span class="dock-art">${artMarkup(getArtworkForTrack(track), track.title, 'placeholder-art')}</span><div class="dock-copy"><strong>${escapeHtml(track.title)}</strong><button class="text-entity-link" data-entity-type="artist" data-entity-value="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</button></div>`;
+  return `<span class="dock-art">${artMarkup(getArtworkForTrack(track), track.title, 'placeholder-art')}</span><div class="dock-copy"><strong>${escapeHtml(track.title)}</strong><button class="text-entity-link" data-entity-type="artist" data-entity-value="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</button></div>${likeButtonMarkup(track)}`;
+}
+
+// Cheap targeted refresh: the heart in the dock, the sidebar count, and the Liked Songs or
+// Home view when one is on screen. Everything else is unaffected by a like.
+function refreshLikeViews() {
+  const button = document.querySelector('#playerDock .dock-like-button');
+  if (button && state.currentTrack) button.outerHTML = likeButtonMarkup(state.currentTrack);
+  renderLibrary();
+  if (state.homeActive || (state.view?.type === 'playlist' && state.selectedId === 'liked')) renderContent();
+}
+
+async function loadLikedReferences() {
+  const rootPath = state.library.rootPath;
+  if (!rootPath || likeWritesPending) return false;
+  const paths = await window.spotfck.readLiked();
+  // A library switch or a like issued while reading makes this answer stale.
+  if (state.library.rootPath !== rootPath || likeWritesPending || !Array.isArray(paths)) return false;
+  if (paths.join('\n') === likedReferencePaths.join('\n')) return false;
+  setLikedReferences(paths);
+  return true;
+}
+
+function toggleTrackLike(track = state.currentTrack) {
+  if (!track?.path) return;
+  if (isRootTrack(track)) return showToast('This song lives in your Liked Songs folder. Move the file out of the root to unlike it.');
+  const key = trackPathKey(track.path);
+  const liked = !likedReferenceKeys.has(key);
+  const rootPath = state.library.rootPath;
+  // Optimistic: the heart flips now, the write follows. Writes are chained so a fast
+  // double-click lands on disk in click order instead of racing.
+  setLikedReferences(liked ? [...likedReferencePaths, track.path] : likedReferencePaths.filter((path) => trackPathKey(path) !== key));
+  refreshLikeViews();
+  showToast(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs');
+  likeWritesPending += 1;
+  likeWriteChain = likeWriteChain.then(async () => {
+    try {
+      const paths = await window.spotfck.setTrackLiked(track.path, liked);
+      if (likeWritesPending === 1 && state.library.rootPath === rootPath) setLikedReferences(paths);
+    } catch (error) {
+      showToast(String(error?.message || error || 'Could not update Liked Songs'));
+      // Disk is the source of truth; resync rather than guess which optimistic step failed.
+      if (state.library.rootPath === rootPath) setLikedReferences(await window.spotfck.readLiked());
+    } finally {
+      likeWritesPending -= 1;
+      refreshLikeViews();
+    }
+  });
+  return likeWriteChain;
+}
+
+function persistLikedOrder(paths) {
+  const keys = new Set(paths.map(trackPathKey));
+  const next = [...paths, ...likedReferencePaths.filter((path) => !keys.has(trackPathKey(path)))];
+  if (next.join('\n') === likedReferencePaths.join('\n')) return;
+  setLikedReferences(next);
+  likeWritesPending += 1;
+  likeWriteChain = likeWriteChain.then(async () => {
+    try {
+      setLikedReferences(await window.spotfck.reorderLiked(paths));
+    } catch (error) {
+      showToast(String(error?.message || error || 'Could not save Liked Songs order'));
+      setLikedReferences(await window.spotfck.readLiked());
+    } finally {
+      likeWritesPending -= 1;
+      refreshLikeViews();
+    }
+  });
 }
 
 function renderPlayerDock() {
@@ -1322,6 +1671,9 @@ function toggleMute() {
 function setFullscreenView(enabled) {
   const next = Boolean(enabled);
   closeQueue();
+  // The overlay only fills the window; the OS window must go fullscreen too or the taskbar
+  // stays visible. Only on a real change, so re-renders don't spam the native call.
+  if (next !== state.fullscreenView) window.spotfck.setFullscreen?.(next);
   state.fullscreenView = next;
   clearTimeout(fullscreenVolumeHideTimer);
   fullscreenVolumeVisible = false;
@@ -1354,6 +1706,7 @@ function renderSettingsValues() {
   }
   const removeBackgroundButton = document.getElementById('removeBackgroundButton');
   if (removeBackgroundButton) removeBackgroundButton.disabled = !backgroundPath;
+  renderSurfaceControls();
 
   const inkToggle = document.getElementById('inkToggle');
   if (inkToggle) inkToggle.checked = Boolean(state.settings.showInk);
@@ -1649,7 +2002,7 @@ function findTrackContext(id) {
   const track = tracksById.get(id);
   if (!track) return null;
   const folder = libraryFolderIndex.get(track.folderPath);
-  return { track, queue: folder?.tracks || state.library.likedSongs || [], libraryId: folder?.id || 'liked' };
+  return { track, queue: folder?.tracks || getLikedTracks(), libraryId: folder?.id || 'liked' };
 }
 
 function playTrackById(id) {
@@ -1736,17 +2089,55 @@ function restoreModalFocus() {
   if (target && target.isConnected && typeof target.focus === 'function') requestAnimationFrame(() => target.focus());
 }
 
+// Last-viewed Options category; kept for the session so reopening lands where the user was.
+let settingsTab = 'general';
+
+function setSettingsTab(id, { focus = false } = {}) {
+  const tabs = [...document.querySelectorAll('[data-settings-tab]')];
+  const tab = tabs.find((candidate) => candidate.dataset.settingsTab === id) || tabs[0];
+  if (!tab) return;
+  // Leaving the Shortcuts pane mid-recording would strand the capture (and the released hotkeys).
+  if (shortcutCapture && tab.dataset.settingsTab !== settingsTab) cancelShortcutCapture();
+  settingsTab = tab.dataset.settingsTab;
+  for (const candidate of tabs) {
+    const active = candidate === tab;
+    candidate.classList.toggle('active', active);
+    candidate.setAttribute('aria-selected', String(active));
+    // Roving tabindex: Tab enters the tablist once, arrows move within it.
+    candidate.tabIndex = active ? 0 : -1;
+    document.getElementById(candidate.getAttribute('aria-controls'))?.toggleAttribute('hidden', !active);
+  }
+  const title = document.getElementById('settingsPaneTitle');
+  if (title) title.textContent = tab.textContent.trim();
+  const scroller = document.querySelector('.settings-scroll');
+  if (scroller) scroller.scrollTop = 0;
+  if (focus) tab.focus();
+}
+
+function handleSettingsTabKeydown(event) {
+  const tabs = [...event.currentTarget.querySelectorAll('[data-settings-tab]')];
+  const index = tabs.indexOf(document.activeElement);
+  if (index < 0) return;
+  const target = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: tabs.length - 1 }[event.key];
+  if (target === undefined) return;
+  event.preventDefault();
+  setSettingsTab(tabs[(target + tabs.length) % tabs.length].dataset.settingsTab, { focus: true });
+}
+
 function openSettings() {
   rememberModalFocus();
   renderSettingsValues();
+  renderShortcutSettings();
+  setSettingsTab(settingsTab);
   const modal = document.getElementById('settingsModal');
   modal.classList.remove('hidden');
   syncModalInert();
-  requestAnimationFrame(() => modal.querySelector('[data-action="close-settings"]')?.focus());
+  requestAnimationFrame(() => modal.querySelector('.settings-tab.active')?.focus());
 }
 function closeSettings() {
   const modal = document.getElementById('settingsModal');
   if (modal.classList.contains('hidden')) return;
+  if (shortcutCapture) cancelShortcutCapture();
   modal.classList.add('hidden');
   syncModalInert();
   restoreModalFocus();
@@ -2026,6 +2417,7 @@ function refreshEditedPlaylist(result, previousItem) {
     return `${h0.toString(16).padStart(8, '0')}${h1.toString(16).padStart(8, '0')}`;
   };
   state.playbackAnchorPath = remapLocalPath(state.playbackAnchorPath || '', oldRoot, newRoot);
+  setLikedReferences(likedReferencePaths.map((path) => remapLocalPath(path, oldRoot, newRoot)));
   for (const entry of [...(state.playbackHistoryContexts || []), ...(state.playbackForward || [])]) {
     entry.anchorPath = remapLocalPath(entry.anchorPath || '', oldRoot, newRoot);
   }
@@ -2285,13 +2677,21 @@ async function reorderSelectedTracks(sourceIds, targetId, dropPosition = '') {
     : (firstMovedIndex < originalTargetIndex ? targetIndex + 1 : targetIndex);
   remaining.splice(insertIndex, 0, ...moved);
   tracks.splice(0, tracks.length, ...remaining);
-  state.selectedTracks = tracks;
-  if (item.isLiked) state.library.likedSongs = tracks;
-  else item.tracks = tracks;
+  // Liked Songs mixes root files with liked references, and each half persists to its own
+  // file. Split before touching `likedSongs` (isRootTrack is keyed on the current array),
+  // and let the view snap to "root files, then likes" instead of showing an interleaving
+  // that would silently revert on the next launch.
+  const rootOrder = item.isLiked ? tracks.filter(isRootTrack) : tracks;
+  if (item.isLiked) {
+    const referenceOrder = tracks.filter((track) => !isRootTrack(track));
+    state.library.likedSongs = rootOrder;
+    persistLikedOrder(referenceOrder.map((track) => track.path));
+  } else item.tracks = tracks;
   normalizeLibrary(state.library);
+  state.selectedTracks = item.isLiked ? [...getLikedTracks()] : tracks;
   renderContent();
   const version = ++pending.version;
-  const paths = tracks.map((track) => track.path);
+  const paths = rootOrder.map((track) => track.path);
   const write = pending.chain.then(async () => {
     const result = await window.spotfck.reorderPlaylist({ rootPath, folderPath, paths });
     if (result?.ok === false) throw new Error(result.error || 'Could not save song order');
@@ -2313,7 +2713,7 @@ async function reorderSelectedTracks(sourceIds, targetId, dropPosition = '') {
         if (item.isLiked) state.library.likedSongs = restored;
         else liveFolder.tracks = restored;
         const selected = getSelectedItem();
-        if ((selected?.path || (selected?.isLiked ? rootPath : '')) === folderPath) state.selectedTracks = restored;
+        if ((selected?.path || (selected?.isLiked ? rootPath : '')) === folderPath) state.selectedTracks = selected.isLiked ? [...getLikedTracks()] : restored;
         normalizeLibrary(state.library);
         renderContent();
       }
@@ -2361,6 +2761,7 @@ async function chooseLibrary() {
     }
     if (!await persistSettings({ libraryPath: chosen })) return;
     state.settings.libraryPath = chosen;
+    setLikedReferences([]);
     state.selectedId = 'liked';
     state.selectedTracks = [];
     await scanLibrary({ preservePlayback: false });
@@ -2450,6 +2851,7 @@ async function scanLibrary({ preservePlayback = true, background = false, change
       state.selectedTracks = getSelectedItem()?.tracks || [];
       state.libraryQuery = '';
       render();
+      loadLikedReferences().then((changed) => { if (changed) refreshLikeViews(); }).catch(() => {});
       reportEvent('library.scan-applied', { requestId, folders: state.library.folderCount, tracks: state.library.trackCount, cached: false });
       window.spotfck.watchLibrary(rootPath).catch((error) => {
         reportEvent('library.watcher-start-failed', { error: String(error) }, 'warn');
@@ -2640,6 +3042,327 @@ function seekBy(seconds) {
   writePlaybackPosition();
 }
 
+// --- shortcuts ---------------------------------------------------------------------------
+// A binding is `[Ctrl+][Alt+][Shift+][Meta+]<base>`, where <base> is the physical
+// `event.code` (so it survives keyboard layout switches) or `MouseN` for mouse button N.
+// One binding per action; '' means the user deliberately left it unbound. Only overrides
+// are persisted (`settings.shortcuts`), so new defaults reach existing users.
+// `playback` actions stay live behind dialogs; `repeatable` ones honour key auto-repeat.
+const SHORTCUT_ACTIONS = [
+  { id: 'togglePlay', label: 'Play / pause', binding: 'Space', playback: true },
+  { id: 'nextTrack', label: 'Next track', binding: 'Ctrl+ArrowRight', playback: true },
+  { id: 'previousTrack', label: 'Previous track', binding: 'Ctrl+ArrowLeft', playback: true },
+  { id: 'seekForward', label: 'Seek forward 5s', binding: 'ArrowRight', playback: true, repeatable: true },
+  { id: 'seekBackward', label: 'Seek back 5s', binding: 'ArrowLeft', playback: true, repeatable: true },
+  { id: 'volumeUp', label: 'Volume up', binding: 'ArrowUp', playback: true, repeatable: true },
+  { id: 'volumeDown', label: 'Volume down', binding: 'ArrowDown', playback: true, repeatable: true },
+  { id: 'toggleMute', label: 'Mute / unmute', binding: '', playback: true },
+  { id: 'toggleLike', label: 'Like current song', binding: '', playback: true },
+  { id: 'toggleShuffle', label: 'Shuffle', binding: '' },
+  { id: 'cycleRepeat', label: 'Repeat mode', binding: '' },
+  { id: 'toggleFullscreen', label: 'Fullscreen player', binding: 'KeyF' },
+  { id: 'navigateBack', label: 'Go back', binding: 'Mouse4' },
+  { id: 'navigateForward', label: 'Go forward', binding: 'Mouse5' }
+];
+const SHORTCUT_ACTIONS_BY_ID = new Map(SHORTCUT_ACTIONS.map((action) => [action.id, action]));
+// Global shortcuts are registered with the OS (RegisterHotKey) and fire while Lyra is in the
+// background or hidden in the tray. Only playback actions qualify (the Rust side keeps the
+// same list), and nothing is bound by default: grabbing a system-wide chord is the user's call.
+// Stored in full (`settings.globalShortcuts`), keyboard only, and a modifier is required
+// unless the key is an F-key or media key — a bare letter would be stolen from every app.
+const GLOBAL_SHORTCUT_ACTIONS = SHORTCUT_ACTIONS.filter((action) => action.playback);
+const SHORTCUT_SCOPES = {
+  local: { settingsKey: 'shortcuts', actions: SHORTCUT_ACTIONS, listId: 'shortcutList', useDefaults: true },
+  global: { settingsKey: 'globalShortcuts', actions: GLOBAL_SHORTCUT_ACTIONS, listId: 'globalShortcutList', useDefaults: false }
+};
+const SHORTCUT_MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'];
+const MODIFIER_CODE_PATTERN = /^(Control|Shift|Alt|Meta|OS)(Left|Right)?$/;
+const NON_TEXT_INPUT_TYPES = new Set(['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file', 'image']);
+const SCROLLABLE_REGION_SELECTOR = '.library-list, .home-view, .global-results-view, .now-playing-panel, .queue-panel, #trackContextMenu';
+const SHORTCUT_KEY_LABELS = {
+  Space: 'Space', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc',
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
+  Mouse3: 'Middle click', Mouse4: 'Mouse back', Mouse5: 'Mouse forward',
+  MediaPlayPause: 'Media play/pause', MediaTrackNext: 'Media next', MediaTrackPrevious: 'Media previous', MediaStop: 'Media stop',
+  AudioVolumeUp: 'Volume up key', AudioVolumeDown: 'Volume down key', AudioVolumeMute: 'Mute key'
+};
+let shortcutLookup = new Map();
+let shortcutCapture = null;
+let ignoreNextRecordClick = false;
+let suppressedKeyupCode = '';
+let globalShortcutErrors = {};
+let globalShortcutSync = Promise.resolve();
+
+function getShortcutBindings(scope = 'local') {
+  const { settingsKey, actions, useDefaults } = SHORTCUT_SCOPES[scope];
+  const saved = state.settings[settingsKey];
+  const overrides = saved && typeof saved === 'object' ? saved : {};
+  return Object.fromEntries(actions.map((action) => [action.id, typeof overrides[action.id] === 'string' ? overrides[action.id] : useDefaults ? action.binding : '']));
+}
+
+function isGlobalShortcutCandidate(binding) {
+  const base = String(binding || '').split('+').pop();
+  if (!base || base.startsWith('Mouse')) return false;
+  return binding.includes('+') || /^F([1-9]|1[0-2])$/.test(base) || /^(Media|AudioVolume)/.test(base);
+}
+
+// Pushes the current global bindings to the OS. Chained so overlapping calls apply in order,
+// and the bindings are read when the call actually runs, so the last state always wins.
+// While any shortcut is being recorded every hotkey is released: a registered chord never
+// reaches the webview, so the recorder could not see it (and it would fire its action).
+function syncGlobalShortcuts() {
+  globalShortcutSync = globalShortcutSync.catch(() => {}).then(async () => {
+    const bindings = shortcutCapture ? {} : getShortcutBindings('global');
+    const errors = await window.spotfck.setGlobalShortcuts(bindings);
+    if (shortcutCapture) return;
+    const previous = globalShortcutErrors;
+    globalShortcutErrors = errors && typeof errors === 'object' ? errors : {};
+    renderShortcutSettings();
+    // Only announce failures that are new, not the same conflict on every settings save.
+    const fresh = Object.keys(globalShortcutErrors).filter((id) => previous[id] !== globalShortcutErrors[id]);
+    if (fresh.length) {
+      const labels = fresh.map((id) => `${SHORTCUT_ACTIONS_BY_ID.get(id)?.label || id} (${formatShortcut(bindings[id])})`);
+      showToast(`Global shortcut unavailable: ${labels.join(', ')} — ${globalShortcutErrors[fresh[0]]}`);
+    }
+  });
+  return globalShortcutSync;
+}
+
+function handleGlobalShortcut(id) {
+  // Payload comes from Rust, but stay strict: only bound global playback actions run.
+  if (shortcutCapture || !GLOBAL_SHORTCUT_ACTIONS.some((action) => action.id === id)) return;
+  if (!getShortcutBindings('global')[id]) return;
+  runShortcutAction(id);
+}
+
+function rebuildShortcutLookup() {
+  shortcutLookup = new Map();
+  for (const [id, binding] of Object.entries(getShortcutBindings())) {
+    if (binding && !shortcutLookup.has(binding)) shortcutLookup.set(binding, id);
+  }
+}
+
+function shortcutModifierPrefix(event) {
+  return SHORTCUT_MODIFIERS.filter((name) => event[`${name.toLowerCase()}Key`]).map((name) => `${name}+`).join('');
+}
+
+function keyboardShortcutBinding(event) {
+  // Some media keys arrive with an empty `code`; fall back to `key` for those.
+  const base = event.code || (event.key && event.key !== 'Unidentified' ? event.key : '');
+  if (!base || MODIFIER_CODE_PATTERN.test(base)) return '';
+  return shortcutModifierPrefix(event) + base;
+}
+
+// Left and right buttons stay reserved for clicking and context menus; every other button
+// (middle, back, forward, and the extra thumb buttons gaming mice expose) is bindable.
+function mouseShortcutBinding(event) {
+  if (!Number.isInteger(event.button) || event.button < 0 || event.button === 0 || event.button === 2) return '';
+  return `${shortcutModifierPrefix(event)}Mouse${event.button + 1}`;
+}
+
+function formatShortcut(binding) {
+  if (!binding) return 'Not set';
+  const parts = binding.split('+');
+  const base = parts.pop();
+  const label = SHORTCUT_KEY_LABELS[base] || base
+    .replace(/^Key([A-Z])$/, '$1').replace(/^Digit(\d)$/, '$1')
+    .replace(/^Numpad(.+)$/, 'Num $1').replace(/^Mouse(\d+)$/, 'Mouse $1');
+  return [...parts, label].join(' + ');
+}
+
+function isTextEntryElement(element) {
+  if (!element) return false;
+  if (element.isContentEditable || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT') return true;
+  return element.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has(element.type);
+}
+
+function isModalOpen() {
+  return Boolean(document.querySelector('.modal-backdrop:not(.hidden)'));
+}
+
+function shortcutAllowedHere(binding, action) {
+  // Behind a dialog only playback control makes sense; navigating would change a screen
+  // the user cannot see.
+  if (isModalOpen() && !action.playback) return false;
+  const base = binding.split('+').pop();
+  // Mouse buttons, F-keys and media keys never collide with typing.
+  if (base.startsWith('Mouse') || /^F\d{1,2}$/.test(base) || /^(Media|AudioVolume)/.test(base)) return true;
+  const active = document.activeElement;
+  // Typing a space into search must still type a space.
+  if (isTextEntryElement(active)) return false;
+  if (!binding.includes('+') && /^(Arrow|Page|Home$|End$)/.test(base)) {
+    // Bare arrows keep their native meaning on sliders, in scrollable panels and in dialogs.
+    if (isModalOpen() || (active?.tagName === 'INPUT' && active.type === 'range') || active?.closest?.(SCROLLABLE_REGION_SELECTOR)) return false;
+  }
+  return true;
+}
+
+function cycleRepeatMode() {
+  state.repeatMode = state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off';
+  renderPlayerDock();
+  if (state.fullscreenView) renderFullscreenPlayer();
+  updatePlaybackModeControls();
+  showToast(state.repeatMode === 'one' ? 'Repeat one' : state.repeatMode === 'all' ? 'Repeat all' : 'Repeat off');
+  persistPlaybackSession();
+}
+
+function runShortcutAction(id) {
+  if (id === 'togglePlay') return togglePlay();
+  if (id === 'nextTrack') { state.consecutivePlaybackErrors = 0; return nextTrack(); }
+  if (id === 'previousTrack') { state.consecutivePlaybackErrors = 0; return previousTrack(); }
+  if (id === 'seekForward') return seekBy(5);
+  if (id === 'seekBackward') return seekBy(-5);
+  if (id === 'volumeUp' || id === 'volumeDown') {
+    setVolume(audio.volume + (id === 'volumeUp' ? 0.05 : -0.05), true);
+    return revealFullscreenVolume();
+  }
+  if (id === 'toggleMute') return toggleMute();
+  if (id === 'toggleLike') return toggleTrackLike();
+  if (id === 'toggleShuffle') return toggleShuffleMode();
+  if (id === 'cycleRepeat') return cycleRepeatMode();
+  if (id === 'toggleFullscreen') return toggleFullscreenView();
+  if (id === 'navigateBack') return state.fullscreenView ? setFullscreenView(false) : navigateHistory(-1);
+  if (id === 'navigateForward') return navigateHistory(1);
+}
+
+function handleShortcutKeydown(event) {
+  const binding = keyboardShortcutBinding(event);
+  const action = SHORTCUT_ACTIONS_BY_ID.get(shortcutLookup.get(binding));
+  if (!action || !shortcutAllowedHere(binding, action)) return false;
+  // preventDefault on keydown is what stops a focused button or checkbox from also
+  // activating on Space; keyup is suppressed as well because Chromium activates there.
+  event.preventDefault();
+  suppressedKeyupCode = event.code;
+  // A held Space must not machine-gun play/pause; seek and volume are meant to repeat.
+  if (event.repeat && !action.repeatable) return true;
+  runShortcutAction(action.id);
+  return true;
+}
+
+function handleShortcutMouse(event) {
+  if (shortcutCapture) return;
+  if (event.type === 'mousedown') ignoreNextRecordClick = false;
+  const binding = mouseShortcutBinding(event);
+  if (!binding) return;
+  const action = SHORTCUT_ACTIONS_BY_ID.get(shortcutLookup.get(binding));
+  // Back/forward are always swallowed: left alone, WebView2 treats them as history
+  // navigation of the page itself.
+  if (action || event.button === 3 || event.button === 4) event.preventDefault();
+  if (event.type !== 'mousedown' || !action || !shortcutAllowedHere(binding, action)) return;
+  runShortcutAction(action.id);
+}
+
+function renderShortcutSettings() {
+  renderShortcutList('local');
+  renderShortcutList('global');
+}
+
+function renderShortcutList(scope) {
+  const { actions, listId } = SHORTCUT_SCOPES[scope];
+  const list = document.getElementById(listId);
+  if (!list) return;
+  // Two columns filled top-to-bottom, so related actions (play, next, previous) stay adjacent.
+  list.style.setProperty('--shortcut-rows', String(Math.ceil(actions.length / 2)));
+  // Built once and then patched in place: replacing the buttons between mousedown and
+  // mouseup would swallow the click that the capture logic below relies on.
+  if (!list.children.length) {
+    list.innerHTML = actions.map((action) => `<div class="shortcut-row" data-shortcut-row="${action.id}"><span class="shortcut-label">${escapeHtml(action.label)}</span><span class="shortcut-controls"><button type="button" class="shortcut-chip" data-action="record-shortcut" data-shortcut-id="${action.id}" data-shortcut-scope="${scope}"></button><button type="button" class="icon-button small shortcut-clear" data-action="clear-shortcut" data-shortcut-id="${action.id}" data-shortcut-scope="${scope}" aria-label="Clear ${escapeHtml(action.label)} shortcut" title="Clear shortcut">${iconMarkup('close')}</button></span></div>`).join('');
+  }
+  const bindings = getShortcutBindings(scope);
+  const prompt = scope === 'global' ? 'Press a key combination…' : 'Press a key or mouse button…';
+  for (const action of actions) {
+    const row = list.querySelector(`[data-shortcut-row="${action.id}"]`);
+    if (!row) continue;
+    const chip = row.querySelector('.shortcut-chip');
+    const recording = shortcutCapture?.id === action.id && shortcutCapture.scope === scope;
+    const label = formatShortcut(bindings[action.id]);
+    // Only global bindings can fail to apply: the OS refuses chords another app owns.
+    const error = scope === 'global' && bindings[action.id] ? globalShortcutErrors[action.id] || '' : '';
+    chip.textContent = recording ? prompt : label;
+    chip.classList.toggle('recording', recording);
+    chip.classList.toggle('unset', !recording && !bindings[action.id]);
+    chip.classList.toggle('conflict', !recording && Boolean(error));
+    chip.title = error;
+    chip.setAttribute('aria-label', `${action.label}: ${recording ? 'waiting for a key' : label}${error ? ` (${error})` : ''}. Activate to change.`);
+    row.querySelector('.shortcut-clear').disabled = !bindings[action.id];
+  }
+}
+
+function setShortcutOverrides(overrides, message = '', scope = 'local') {
+  const wasCapturing = Boolean(shortcutCapture);
+  state.settings[SHORTCUT_SCOPES[scope].settingsKey] = overrides;
+  shortcutCapture = null;
+  rebuildShortcutLookup();
+  renderShortcutSettings();
+  // Recording released the hotkeys, so finishing any capture must re-register them.
+  if (scope === 'global' || wasCapturing) syncGlobalShortcuts();
+  persistSettings();
+  if (message) showToast(message);
+}
+
+function assignShortcut(id, binding, scope = 'local') {
+  const { settingsKey, actions } = SHORTCUT_SCOPES[scope];
+  const action = actions.find((candidate) => candidate.id === id);
+  if (!action) return;
+  if (scope === 'global' && !isGlobalShortcutCandidate(binding)) {
+    showToast('Global shortcuts need Ctrl, Alt, Shift or Win — or an F-key or media key');
+    return cancelShortcutCapture();
+  }
+  const overrides = { ...(state.settings[settingsKey] || {}) };
+  const bindings = getShortcutBindings(scope);
+  // One input, one action: stealing a binding unbinds it from its previous owner.
+  const displaced = actions.find((other) => other.id !== id && bindings[other.id] === binding);
+  if (displaced) overrides[displaced.id] = '';
+  overrides[id] = binding;
+  setShortcutOverrides(overrides, displaced
+    ? `${formatShortcut(binding)} now does “${action.label}” (removed from “${displaced.label}”)`
+    : `${action.label}: ${formatShortcut(binding)}${scope === 'global' ? ' (global)' : ''}`, scope);
+}
+
+function startShortcutCapture(id, scope = 'local') {
+  if (!SHORTCUT_SCOPES[scope]?.actions.some((action) => action.id === id)) return;
+  shortcutCapture = { id, scope };
+  renderShortcutSettings();
+  syncGlobalShortcuts();
+}
+
+function cancelShortcutCapture() {
+  shortcutCapture = null;
+  renderShortcutSettings();
+  syncGlobalShortcuts();
+}
+
+// Runs in the window capture phase, ahead of every other handler, so the key or button
+// being recorded is never also executed (Escape must not close the dialog, Space must not
+// toggle playback, Mouse back must not navigate).
+function handleShortcutCapture(event) {
+  if (!shortcutCapture) return;
+  if (event.type === 'keydown') {
+    if (event.key === 'Tab') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressedKeyupCode = event.code;
+    if (event.key === 'Escape') return cancelShortcutCapture();
+    const binding = keyboardShortcutBinding(event);
+    // A lone modifier is the start of a chord; keep waiting for the real key.
+    if (binding) assignShortcut(shortcutCapture.id, binding, shortcutCapture.scope);
+    return;
+  }
+  if (event.type !== 'mousedown') return;
+  const binding = mouseShortcutBinding(event);
+  if (!binding) {
+    // Left/right click cancels. Clicking the same chip again must not immediately restart.
+    const chip = event.target.closest?.('[data-action="record-shortcut"]');
+    ignoreNextRecordClick = chip?.dataset.shortcutId === shortcutCapture.id && chip?.dataset.shortcutScope === shortcutCapture.scope;
+    return cancelShortcutCapture();
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  // assignShortcut rejects mouse buttons for the global scope (RegisterHotKey is keys only).
+  assignShortcut(shortcutCapture.id, binding, shortcutCapture.scope);
+}
+
 function bindBackgroundFullscreenShortcut() {
   const excluded = 'button, input, textarea, select, a, img, [contenteditable="true"], [data-tauri-drag-region], .app-drag, .track-row, .playlist-card, .library-item-main, .modal-backdrop, .player-dock, .topbar, .now-art, .hero-art, .playlist-card-art, .track-art';
   const isBackground = (target) => target instanceof Element
@@ -2690,7 +3413,35 @@ function handlePlaybackError() {
   playbackErrorTimer = timer;
 }
 
+// Scrollbars are invisible until the user scrolls. Must match the selector list in the
+// "Scrollbars" block at the end of styles.css.
+const SCROLL_REVEAL_SELECTOR = '.search-suggest, .library-list, .track-list, .now-playing-panel, .home-view, .global-results-view, .queue-list, .playlist-edit-modal, .fullscreen-shell, .search-rail-scroller';
+const SCROLL_REVEAL_MS = 900;
+
+function bindScrollReveal() {
+  const timers = new WeakMap();
+  // Only user-driven scrolls reveal the bar. A wheel/touchpad tick or a pointer press (a thumb
+  // drag) records where the user is acting; a scroll counts only if that point is inside the
+  // scroller. Renders that restore scrollTop or scrollIntoView() a row never flash it.
+  let intent = { target: null, until: 0 };
+  const capture = { capture: true, passive: true };
+  document.addEventListener('wheel', (event) => { intent = { target: event.target, until: performance.now() + 300 }; }, capture);
+  document.addEventListener('pointerdown', (event) => { intent = { target: event.target, until: Infinity }; }, capture);
+  document.addEventListener('pointerup', () => { if (intent.until === Infinity) intent.until = performance.now() + 150; }, capture);
+  // `scroll` doesn't bubble, but it does capture, so one listener sees every scroller,
+  // including the ones the renderer re-creates with innerHTML.
+  document.addEventListener('scroll', (event) => {
+    const scroller = event.target;
+    if (!(scroller instanceof Element) || !scroller.matches(SCROLL_REVEAL_SELECTOR)) return;
+    if (performance.now() > intent.until || !(intent.target instanceof Node) || !scroller.contains(intent.target)) return;
+    scroller.classList.add('is-scrolling');
+    clearTimeout(timers.get(scroller));
+    timers.set(scroller, setTimeout(() => scroller.classList.remove('is-scrolling'), SCROLL_REVEAL_MS));
+  }, capture);
+}
+
 function bindEvents() {
+  bindScrollReveal();
   if (navigator.mediaSession) {
     const handlers = {
       play: () => { if (audio.paused) togglePlay(); }, pause: () => audio.pause(),
@@ -2707,6 +3458,7 @@ function bindEvents() {
   bindArtworkFallbacks();
   window.addEventListener('beforeunload', writePlaybackSessionNow);
   window.spotfck.onLibraryProgress(handleScanProgress);
+  window.spotfck.onGlobalShortcut(handleGlobalShortcut);
   const pendingChanges = new Set();
   let watcherNeedsFullRefresh = false;
   window.spotfck.onLibraryChanged((payload) => {
@@ -2727,6 +3479,7 @@ function bindEvents() {
   });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('#trackContextMenu')) hideTrackContextMenu();
+    if (!event.target.closest('.global-search')) closeSearchSuggest();
     if (isQueueOpen() && !event.target.closest('#queuePanel') && !event.target.closest('[data-action="queue"]')) closeQueue();
     const viewToggle = event.target.closest('.view-toggle[data-view]');
     if (viewToggle) {
@@ -2746,10 +3499,13 @@ function bindEvents() {
       if (action === 'open-reports') openReportFolder();
       if (action === 'choose-background') chooseBackground();
       if (action === 'remove-background') removeBackground();
+      if (action === 'toggle-blur-link') toggleBlurLink();
+      if (action === 'open-playlist' && actionElement.dataset.libraryId) navigateTo({ type: 'playlist', id: actionElement.dataset.libraryId });
       if (action === 'choose-profile') chooseProfilePicture();
       if (action === 'remove-profile') removeProfilePicture();
       if (action === 'open-profile' || action === 'settings') openSettings();
       if (action === 'close-settings') closeSettings();
+      if (action === 'settings-tab') setSettingsTab(actionElement.dataset.settingsTab);
       if (action === 'edit-playlist') openPlaylistEditor(actionElement.dataset.libraryId);
       if (action === 'close-playlist-editor') closePlaylistEditor();
       if (action === 'delete-playlist') deleteSelectedPlaylist();
@@ -2768,17 +3524,23 @@ function bindEvents() {
       if (action === 'shuffle-selected') toggleShuffleMode();
       if (action === 'play-track') playTrackById(actionElement.dataset.trackId);
       if (action === 'toggle-play') togglePlay();
+      if (action === 'toggle-like') toggleTrackLike();
       if (action === 'next') nextTrack();
       if (action === 'previous') previousTrack();
       if (action === 'shuffle') toggleShuffleMode();
-      if (action === 'repeat') {
-        state.repeatMode = state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off';
-        renderPlayerDock();
-        if (state.fullscreenView) renderFullscreenPlayer();
-        updatePlaybackModeControls();
-        showToast(state.repeatMode === 'one' ? 'Repeat one' : state.repeatMode === 'all' ? 'Repeat all' : 'Repeat off');
-        persistPlaybackSession();
+      if (action === 'repeat') cycleRepeatMode();
+      if (action === 'record-shortcut') {
+        if (ignoreNextRecordClick) ignoreNextRecordClick = false;
+        else startShortcutCapture(actionElement.dataset.shortcutId, actionElement.dataset.shortcutScope);
       }
+      if (action === 'clear-shortcut') {
+        const scope = actionElement.dataset.shortcutScope === 'global' ? 'global' : 'local';
+        const { settingsKey } = SHORTCUT_SCOPES[scope];
+        const shortcut = SHORTCUT_ACTIONS_BY_ID.get(actionElement.dataset.shortcutId);
+        if (shortcut) setShortcutOverrides({ ...(state.settings[settingsKey] || {}), [shortcut.id]: '' }, `${shortcut.label}: shortcut cleared`, scope);
+      }
+      if (action === 'reset-shortcuts') setShortcutOverrides({}, 'Shortcuts reset to defaults');
+      if (action === 'clear-global-shortcuts') setShortcutOverrides({}, 'Global shortcuts cleared', 'global');
       if (action === 'add-queue') queueTracks(state.selectedTracks);
       if (action === 'add-track-queue') {
         const context = findTrackContext(actionElement.dataset.trackId);
@@ -2833,6 +3595,10 @@ function bindEvents() {
       if (action === 'clear-search') {
         if (state.view?.type === 'search' && state.navigationIndex > 0) navigateHistory(-1);
         else navigateTo({ type: 'home' });
+        return;
+      }
+      if (action === 'commit-search') {
+        commitSearch(document.getElementById('globalSearch').value);
         return;
       }
       if (action === 'toggle-search-all-songs') {
@@ -2910,28 +3676,45 @@ function bindEvents() {
 
   bindBackgroundFullscreenShortcut();
 
-  document.getElementById('globalSearch').addEventListener('input', (event) => {
+  const globalSearchInput = document.getElementById('globalSearch');
+  // Typing only drives the dropdown; the results page opens on Enter / "See all".
+  // Debounced so a big library is scanned once per typing pause, not per keystroke.
+  globalSearchInput.addEventListener('input', (event) => {
     const query = event.target.value;
     clearTimeout(contentSearchTimer);
-    contentSearchTimer = setTimeout(() => {
-      if (!query.trim()) {
-        state.query = '';
-        if (state.view?.type === 'search' && state.navigationIndex > 0) navigateHistory(-1);
-        else renderContent();
-        return;
-      }
-      if (state.view?.type === 'search') {
-        state.searchShowAllSongs = false;
-        state.query = query;
-        state.view.query = query;
-        state.navigationHistory[state.navigationIndex] = { ...state.view };
-        renderContent();
-        updateNavigationControls();
-      } else {
-        navigateTo({ type: 'search', query });
-        requestAnimationFrame(() => document.getElementById('globalSearch')?.focus());
-      }
-    }, 90);
+    contentSearchTimer = setTimeout(() => renderSearchSuggest(query), 90);
+  });
+  globalSearchInput.addEventListener('focus', (event) => { if (event.target.value.trim()) renderSearchSuggest(event.target.value); });
+  globalSearchInput.addEventListener('keydown', (event) => {
+    if (event.isComposing) return;
+    const panel = document.getElementById('searchSuggest');
+    const open = !panel.hidden;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) renderSearchSuggest(event.target.value);
+      moveSearchSuggest(event.key === 'ArrowDown' ? 1 : -1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      // Kill a pending debounce, or it re-opens the panel right after we close it.
+      clearTimeout(contentSearchTimer);
+      const active = open && searchSuggestIndex >= 0 ? panel.querySelector(`[data-suggest-index="${searchSuggestIndex}"] .search-suggest-main`) : null;
+      if (active) active.click();
+      else commitSearch(event.target.value);
+    } else if (event.key === 'Escape' && open) {
+      // stopPropagation: the document-level Escape would also close fullscreen / the queue.
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchSuggest();
+    }
+  });
+  document.getElementById('searchSuggest').addEventListener('click', (event) => {
+    // Picking a result closes the panel; "+ queue" keeps it open so several songs can be
+    // queued in a row. This runs before the document-level delegate does the actual action.
+    if (event.target.closest('.search-suggest-main')) {
+      clearTimeout(contentSearchTimer);
+      closeSearchSuggest();
+      globalSearchInput.blur();
+    }
   });
   document.getElementById('libraryFilter').addEventListener('input', (event) => {
     state.libraryQuery = event.target.value;
@@ -2941,6 +3724,17 @@ function bindEvents() {
   document.getElementById('inkToggle').addEventListener('change', (event) => toggleInk(event.target.checked));
   document.getElementById('closeToTrayToggle').addEventListener('change', (event) => { state.settings.closeToTray = event.target.checked; persistSettings(); });
   document.getElementById('accentColorPicker').addEventListener('change', (event) => setAccentColor(event.target.value));
+  for (const input of document.querySelectorAll('[data-surface-setting]')) {
+    // `input` restyles live while dragging; `change` (on release) writes settings.json once
+    // instead of on every pixel of travel.
+    input.addEventListener('input', () => setSurfaceSetting(input.dataset.surfaceSetting, input.value));
+    input.addEventListener('change', () => persistSettings());
+    // The dialog's dimmed, blurred backdrop would hide the very panels being tuned, so it
+    // clears while the thumb is held.
+    input.addEventListener('pointerdown', () => document.getElementById('settingsModal')?.classList.add('surface-preview'));
+  }
+  window.addEventListener('pointerup', () => document.getElementById('settingsModal')?.classList.remove('surface-preview'));
+  window.addEventListener('pointercancel', () => document.getElementById('settingsModal')?.classList.remove('surface-preview'));
   document.getElementById('playerDock').addEventListener('wheel', (event) => {
     event.preventDefault();
     if (event.deltaY === 0) return;
@@ -2959,6 +3753,7 @@ function bindEvents() {
     setVolume(audio.volume + (event.deltaY < 0 ? 0.05 : -0.05), true);
   }, { passive: false });
   document.getElementById('settingsModal').addEventListener('click', (event) => { if (event.target.id === 'settingsModal') closeSettings(); });
+  document.querySelector('#settingsModal .settings-tabs')?.addEventListener('keydown', handleSettingsTabKeydown);
   document.getElementById('playlistEditModal').addEventListener('click', (event) => { if (event.target.id === 'playlistEditModal') closePlaylistEditor(); });
   document.getElementById('playlistEditForm').addEventListener('submit', (event) => { event.preventDefault(); savePlaylistEditor(); });
   document.getElementById('trackEditModal')?.addEventListener('click', (event) => { if (event.target.id === 'trackEditModal') closeTrackEditor(); });
@@ -2995,18 +3790,10 @@ function bindEvents() {
       else if (state.fullscreenView) setFullscreenView(false);
       return;
     }
-    if (!activeModal && !event.ctrlKey && !event.metaKey && !event.altKey && String(event.key || '').toLowerCase() === 'f') {
-      const active = document.activeElement;
-      const isRangeControl = active?.tagName === 'INPUT' && active?.type === 'range';
-      const isTypingField = ['TEXTAREA', 'SELECT'].includes(active?.tagName) || (active?.tagName === 'INPUT' && !isRangeControl && !['button', 'submit', 'checkbox', 'radio'].includes(active.type));
-      if (state.fullscreenView || !isTypingField) {
-        event.preventDefault();
-        toggleFullscreenView();
-        return;
-      }
-    }
     if (event.key === 'Tab' && activeModal) {
-      const focusable = [...activeModal.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      // Inactive Options panes and non-selected tabs are in the DOM but not reachable by Tab.
+      const focusable = [...activeModal.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => element.tabIndex >= 0 && !element.closest('[hidden]'));
       if (focusable.length) {
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -3057,36 +3844,32 @@ function bindEvents() {
         });
         return;
       }
-      const inScrollableRegion = document.activeElement?.closest?.('.library-list, .home-view, .global-results-view, .now-playing-panel, .queue-panel, #trackContextMenu');
-      if (['ArrowLeft', 'ArrowRight'].includes(event.key) && (event.ctrlKey || event.metaKey || !inScrollableRegion)) {
-        event.preventDefault();
-        if (event.ctrlKey || event.metaKey) { state.consecutivePlaybackErrors = 0; event.key === 'ArrowRight' ? nextTrack() : previousTrack(); }
-        else seekBy(event.key === 'ArrowRight' ? 5 : -5);
-        return;
-      }
-      if (['ArrowUp', 'ArrowDown'].includes(event.key) && !inScrollableRegion) {
-        event.preventDefault(); setVolume(audio.volume + (event.key === 'ArrowUp' ? 0.05 : -0.05), true); return;
-      }
     }
+    // Enter opens/plays the focused row. Space no longer does: it belongs to whatever the
+    // play/pause binding is, no matter which row, button or slider has focus.
     const focusedLibraryItem = document.activeElement?.matches('.library-item-main[data-library-id]');
-    if (focusedLibraryItem && (event.key === 'Enter' || event.key === ' ')) {
+    if (focusedLibraryItem && event.key === 'Enter') {
       event.preventDefault();
       document.activeElement.click();
       return;
     }
     const focusedTrackRow = document.activeElement?.matches('.track-row[data-track-id]');
-    if (focusedTrackRow && (event.key === 'Enter' || event.key === ' ')) {
+    if (focusedTrackRow && event.key === 'Enter') {
       event.preventDefault();
-      const trackId = document.activeElement.dataset.trackId;
-      if (event.key === ' ' && state.currentTrack?.id === trackId) {
-        togglePlay();
-      } else {
-        playTrackById(trackId);
-      }
+      playTrackById(document.activeElement.dataset.trackId);
       return;
     }
-    if (event.code === 'Space' && !['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlay(); }
+    handleShortcutKeydown(event);
   });
+  document.addEventListener('keyup', (event) => {
+    if (suppressedKeyupCode && event.code === suppressedKeyupCode) {
+      suppressedKeyupCode = '';
+      event.preventDefault();
+    }
+  });
+  window.addEventListener('keydown', handleShortcutCapture, true);
+  window.addEventListener('mousedown', handleShortcutCapture, true);
+  for (const type of ['mousedown', 'mouseup', 'auxclick']) window.addEventListener(type, handleShortcutMouse, true);
   document.addEventListener('input', (event) => {
     if (event.target.id === 'contextSearch') {
       state.listQuery = event.target.value;
@@ -3263,6 +4046,11 @@ async function init() {
   // Before anything awaits: paint in the theme this user actually has.
   applyCachedAppearance();
   reportEvent('renderer.initializing', { language: navigator.language, userAgent: navigator.userAgent });
+  // Defaults are live before settings arrive, so Space works from the very first frame.
+  rebuildShortcutLookup();
+  // A reload while the fullscreen player was open would otherwise leave the window
+  // fullscreen with no player to exit from.
+  window.spotfck.setFullscreen?.(false);
   bindEvents();
   try {
     const saved = localStorage.getItem('lyra-volume');
@@ -3272,6 +4060,9 @@ async function init() {
   const needsPaletteMigration = Number(settings?.paletteVersion || 0) < 1;
   const needsLayoutMigration = Number(settings?.layoutVersion || 0) < 1;
   state.settings = { ...state.settings, ...(settings || {}) };
+  rebuildShortcutLookup();
+  // Hotkeys live in the renderer's settings, so they register once those are known.
+  syncGlobalShortcuts();
   initSidebarResizers();
   if (needsPaletteMigration) {
     state.settings.theme = 'lyra';
@@ -3303,6 +4094,7 @@ async function init() {
   if (cachedLibrary?.ok) {
     state.library = normalizeLibrary(cachedLibrary);
     state.selectedId = 'liked';
+    await loadLikedReferences().catch(() => false);
     state.selectedTracks = getSelectedItem()?.tracks || [];
     restorePlaybackSession();
     render();
@@ -3313,7 +4105,10 @@ async function init() {
   }
   const reportInfo = await window.spotfck.getReportInfo().catch(() => null);
   const reportPath = document.getElementById('settingsReportPath');
-  if (reportPath && reportInfo?.directory) reportPath.textContent = reportInfo.directory;
+  if (reportPath && reportInfo?.directory) {
+    reportPath.textContent = reportInfo.directory;
+    reportPath.title = reportInfo.directory;
+  }
   reportEvent('renderer.ready', { theme: state.settings.theme, libraryView: state.libraryView, libraryConfigured: Boolean(state.settings.libraryPath) });
   scanLibrary({ preservePlayback: true });
 }
