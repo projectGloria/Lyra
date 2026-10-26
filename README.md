@@ -1,93 +1,306 @@
+<div align="center">
+
+<img src="newIcon.png" alt="Lyra Logo" width="128" height="128" />
+
 # Lyra
 
+**A refined, local-first music player crafted for Windows**
 
+*Your library, your folders, your sound — powered by Tauri, Rust, and fluid web aesthetics.*
 
-## Getting started
+<p>
+  <a href="#-license--credits"><img src="https://img.shields.io/badge/License-ISC-00B074.svg?style=flat-square" alt="License: ISC" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4.svg?style=flat-square&logo=windows" alt="Platform: Windows x64" />
+  <img src="https://img.shields.io/badge/Tauri-1.6-24C8D5.svg?style=flat-square&logo=tauri" alt="Tauri" />
+  <img src="https://img.shields.io/badge/Rust-1.70+-DEA584.svg?style=flat-square&logo=rust" alt="Rust" />
+  <img src="https://img.shields.io/badge/Audio-Lofty%20Metadata-FFA000.svg?style=flat-square" alt="Lofty Audio Engine" />
+  <img src="https://img.shields.io/badge/Telemetry-Zero%20%2F%20100%25%20Offline-success.svg?style=flat-square" alt="Telemetry Disabled" />
+</p>
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+---
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+<p>
+  <a href="#-about-lyra">About</a> •
+  <a href="#-key-features">Features</a> •
+  <a href="#-visual-tour">Visual Tour</a> •
+  <a href="#-supported-audio-formats">Supported Formats</a> •
+  <a href="#-keyboard-shortcuts">Shortcuts</a> •
+  <a href="#-installation--getting-started">Installation</a> •
+  <a href="#-building-from-source">Building</a> •
+  <a href="#-architecture--tech-stack">Architecture</a> •
+  <a href="#-icon--design-philosophy">Design</a> •
+  <a href="#-license--credits">License</a>
+</p>
 
-## Add your files
+<p align="center">
+  <img
+    src="src/assets/defaultArtwork.png"
+    alt="Lyra Artwork & Visual Preview"
+    width="480"
+    style="border-radius: 16px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);"
+  />
+</p>
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+</div>
+
+---
+
+## 🎵 About Lyra
+
+In an era of streaming lock-in, algorithmic feeds, forced subscriptions, and invasive background telemetry, **Lyra** returns control to where it belongs: your local file system and your personal audio collection.
+
+Named after the celestial constellation of the mythical lyre, **Lyra** is a standalone, local-first desktop music player built for Windows with **Tauri** and **Rust**. It marries the agility and visual elegance of a modern web interface with the raw speed, safety, and minimal memory footprint of native systems code:
+
+- 📂 **Folder-Is-The-Database**: No opaque database schemas to corrupt. Every subfolder containing audio files is automatically mapped as a playlist.
+- ❤️ **Root Folder as Liked Songs**: Audio tracks located directly at your library's root folder assemble into your personal collection of favorites without manual tagging.
+- ⚡ **Multi-Threaded Parallel Scanning**: Powered by Rust’s `rayon` and `lofty` metadata parser, Lyra indexes tens of thousands of tracks in seconds.
+- 🌊 **Living Canvas & Glass Aesthetics**: A custom canvas-driven organic ink simulation advects gently behind frosted glass panels, dynamically harmonizing with your tunes.
+- 🛡️ **100% Offline & Private**: Zero analytics, zero network tracking, and zero cloud accounts. What happens in your music folder stays on your machine.
+- 🔄 **Real-Time Filesystem Watcher**: Background notifications detect newly dropped albums, renames, and deletions instantly without requiring manual library rescans.
+
+---
+
+## ✨ Key Features
+
+<table>
+  <tr>
+    <td width="50%">
+      <h3>📂 Folder-as-Playlist Engine</h3>
+      <p>Organize music the natural way. Every folder is a playlist; drop audio in or rearrange folders in Windows Explorer and Lyra mirrors it instantly without vendor lock-in.</p>
+    </td>
+    <td width="50%">
+      <h3>⚡ Rayon-Powered Rust Core</h3>
+      <p>High-concurrency parallel directory scanning with SHA-1 content verification, multi-layer caching, and native <code>lofty</code> tag extraction for instantaneous launches.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🌊 Generative Ink Backdrop</h3>
+      <p>Experience music with a living visual environment. Fluid canvas-based organic ink diffusion flows beneath frosted glass panels, reacting subtly to sound and themes.</p>
+    </td>
+    <td width="50%">
+      <h3>🎛️ Cinematic Fullscreen Player</h3>
+      <p>Immerse yourself with full-window playback featuring vibrant ambient artwork glows, vignette backdrops, oversized track typography, and vertical gesture volume control.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🔄 Live Folder Synchronization</h3>
+      <p>Low-overhead native filesystem watching via the <code>notify</code> crate automatically catches added tracks, renames, and tag adjustments in real time.</p>
+    </td>
+    <td width="50%">
+      <h3>⌨️ System-Wide Global Hotkeys</h3>
+      <p>Control playback from games, IDEs, or full-screen apps with native Windows media keys and customizable in-app shortcut bindings.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🔍 Instant Fuzzy Search &amp; Virtualization</h3>
+      <p>Instant token-matching across tracks, artists, albums, and playlists. Virtualized track lists render 50,000+ songs smoothly at 60 FPS without DOM lag.</p>
+    </td>
+    <td width="50%">
+      <h3>🏷️ Non-Destructive Sidecars &amp; Tag Editor</h3>
+      <p>Per-folder overrides and custom artwork live safely in lightweight sidecar files (<code>.lyra-playlist.json</code>), preserving original audio files and tag integrity.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🖼️ Visual Tour
+
+### 1. Ambient Glassmorphism &amp; Generative Ink Canvas
+Frosted acrylic glass panels layer over a custom real-time 2D ink fluid simulation (`ink-background.js`). The fluid dynamics evolve naturally, creating an ever-changing celestial aesthetic that stays light on CPU and GPU resources.
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/Nihilnia/Lyra.git
-git branch -M main
-git push -uf origin main
+┌────────────────────────────────────────────────────────────────────────┐
+│  [Lyra Logo] Lyra   [<] [>] [⌂]   [ 🔍 What do you want to play? ]     │
+├───────────────────┬──────────────────────────────────┬─────────────────┤
+│ 📂 Your Library   │ 🎵 Currently Viewing             │ 💿 Now Playing  │
+│ ───────────────── │ ──────────────────────────────── │ ─────────────── │
+│ ❤️ Liked Songs    │ Track 01 • Starlight Serenade    │ [Album Artwork] │
+│ 📁 Synthwave 80s  │ Track 02 • Midnight Drive        │ Echoes in Orbit │
+│ 📁 Lo-Fi Beats    │ Track 03 • Neon Horizons         │ Lyra Orchestra  │
+│ 📁 Classical Flac │ Track 04 • Solar Flares          │ 02:45 ────○ 4:10│
+├───────────────────┴──────────────────────────────────┴─────────────────┤
+│ [⏮] [▶/⏸] [⏭]   Starlight Serenade — Lyra Orchestra   [🔀] [🔁] [🔊 80%] │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Integrate with your tools
+### 2. Immersive Fullscreen Now Playing
+Press `F` or `F11` to dive into the fullscreen player. Lyra samples colors from the playing track's artwork to paint a deep, ambient vignette backdrop, paired with clean typography and a floating vertical volume slider.
 
-* [Set up project integrations](https://gitlab.com/Nihilnia/Lyra/-/settings/integrations)
+### 3. Non-Destructive Sidecar Architecture
+Custom playlist names, track orders, and custom covers are stored directly inside the music folder:
+- `.lyra-playlist.json`: Stores custom titles, descriptions, and manual track sequencing.
+- `.lyra-cover.*`: High-resolution custom folder covers that don't overwrite embedded audio tags.
+- `.lyra-liked.json`: Tracks references for songs favorited outside the root folder.
 
-## Collaborate with your team
+---
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## 🎧 Supported Audio Formats
 
-## Test and Deploy
+Lyra is powered by native Rust decoding via the [Lofty](https://github.com/Serial-ATA/lofty-rs) metadata library:
 
-Use the built-in continuous integration in GitLab.
+| Format | File Extension | Type | Metadata &amp; Cover Extraction |
+| :--- | :--- | :--- | :--- |
+| **FLAC** | `.flac` | Lossless | Vorbis Comments, Embedded Picture Blocks |
+| **MP3** | `.mp3` | Lossy | ID3v1, ID3v2.2, ID3v2.3, ID3v2.4 (APIC) |
+| **WAV** | `.wav` | Uncompressed | RIFF INFO chunks, ID3v2 |
+| **AAC / M4A** | `.m4a`, `.m4b`, `.aac` | Lossy / ALAC | MP4 / iTunes atoms (`covr`), ADTS |
+| **Ogg Vorbis** | `.ogg`, `.oga` | Lossy | Vorbis Comments, METADATA_BLOCK_PICTURE |
+| **Opus** | `.opus` | Lossy | Opus Tags, Embedded Artwork |
+| **Matroska / WebM**| `.webm`, `.mka` | Container | Matroska Tagging, Audio Tracks |
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+---
 
-***
+## ⌨️ Keyboard Shortcuts
 
-# Editing this README
+Lyra features full keyboard accessibility and customizable shortcuts:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### In-App Shortcuts
+| Key | Action |
+| :--- | :--- |
+| <kbd>Space</kbd> | Toggle Play / Pause |
+| <kbd>Ctrl</kbd> + <kbd>→</kbd> | Next Track |
+| <kbd>Ctrl</kbd> + <kbd>←</kbd> | Previous Track (or restart track if &gt; 5s) |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Volume Up / Down (5% increments) |
+| <kbd>Ctrl</kbd> + <kbd>F</kbd> | Focus Global Search |
+| <kbd>F</kbd> or <kbd>F11</kbd> | Toggle Fullscreen Player |
+| <kbd>M</kbd> | Toggle Mute |
+| <kbd>S</kbd> | Toggle Shuffle mode |
+| <kbd>R</kbd> | Cycle Repeat mode (Off / All / One) |
+| <kbd>Esc</kbd> | Close modal / Exit fullscreen / Clear selection |
 
-## Suggestions for a good README
+### Global System Shortcuts
+When enabled in **Options &gt; Global shortcuts**, Lyra responds to your hardware media keys and custom chords system-wide, even when minimized to the notification tray.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+---
 
-## Name
-Choose a self-explaining name for your project.
+## 🚀 Installation &amp; Getting Started
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Running the Windows Installer
+Download or build the Windows NSIS installer:
+```powershell
+LyraSetup.exe
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Upon installation:
+- Lyra creates Start Menu and Desktop shortcuts featuring the custom high-contrast icon.
+- User preferences and disk caches are isolated in `%APPDATA%\com.lyra.sona`.
+- The system tray icon enables seamless background listening without cluttering your taskbar.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+### Quick Start Guide
+1. **Select your Music Directory**: On first launch, click **Select Folder** and choose the root folder containing your audio library.
+2. **Instant Scan**: Lyra automatically scans all subfolders in parallel, parsing audio tags and caching album covers.
+3. **Playlists from Folders**: Every subdirectory is immediately available as a playlist in the left sidebar.
+4. **Favorites**: Songs stored directly at your library's root appear automatically under **Liked Songs**.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+---
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## 🛠️ Building from Source
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Prerequisites
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Ensure you have the following installed on your Windows machine:
+- **Node.js** (v18+ recommended)
+- **Rust &amp; Cargo** (v1.70+; install via [rustup.rs](https://rustup.rs/))
+- **Visual Studio C++ Build Tools** (with *Desktop development with C++*)
+- **WebView2** (pre-installed on modern Windows 10/11)
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Build Steps
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+1. **Clone the repository:**
+   ```powershell
+   git clone https://github.com/projectGloria/Lyra.git
+   cd Lyra
+   ```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+2. **Install frontend dependencies:**
+   ```powershell
+   npm install
+   ```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+3. **Run in development mode:**
+   ```powershell
+   npm run dev
+   ```
+   This compiles the Rust backend and launches the Tauri window with live hot-reloading for the frontend.
 
-## License
-For open source projects, say how it is licensed.
+4. **Run the automated test suite:**
+   Lyra includes comprehensive regression and unit tests covering track ID hashing, queue logic, media session contracts, and canvas shaders:
+   ```powershell
+   npm test
+   ```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+5. **Package the production installer:**
+   ```powershell
+   npm run build
+   ```
+   The production-optimized release executable and NSIS installer will be generated in:
+   ```
+   src-tauri/target/release/bundle/nsis/Lyra_1.0.0_x64-setup.exe
+   ```
+
+---
+
+## 🏗️ Architecture &amp; Tech Stack
+
+Lyra is engineered around a clean separation between high-performance native systems code and a zero-latency, reactive user interface:
+
+```mermaid
+flowchart TD
+    subgraph RustCore["Rust Core (Tauri Backend)"]
+        Scanner["Parallel Scanner (Rayon)"]
+        LoftyEngine["Metadata Parser (Lofty)"]
+        Watcher["Live Watcher (Notify)"]
+        Cache["Disk & Journal Cache (SHA-1)"]
+        TrashBin["Safe Deletion (Trash)"]
+        Tray["System Tray & Shortcuts"]
+    end
+
+    subgraph Bridge["IPC Protocol Bridge"]
+        TauriIPC["window.__TAURI__.invoke"]
+        AssetProto["asset:// Protocol Handler"]
+    end
+
+    subgraph Frontend["Modern Web Shell"]
+        State["Single Source State Store"]
+        VirtualList["Virtualized Track Engine (60 FPS)"]
+        InkEngine["Living Ink Canvas (2D Advection)"]
+        Audio["HTML5 Audio Element & Web Audio API"]
+        GlassCSS["Glassmorphism UI & Accent Themes"]
+    end
+
+    RustCore <--> Bridge
+    Bridge <--> Frontend
+```
+
+- **Backend**: Built with **Tauri 1.6** and **Rust**. Handles file I/O, parallel directory walks, metadata parsing, file watching, and native window chrome.
+- **Frontend**: Lightweight vanilla ES2022 and modern CSS. Zero heavy frontend frameworks means minimal memory overhead, instant paint times, and rapid startup.
+- **Audio Output**: Clean asset protocol streaming with Web Audio API analysis for the fluid ink visualizer.
+
+---
+
+## 🎨 Icon &amp; Design Philosophy
+
+<p align="center">
+  <img src="newIcon.png" alt="Lyra Icon Close-up" width="120" height="120" />
+</p>
+
+> *"Like the ancient Lyra constellation glowing in the night sky, music should bring clarity, resonance, and harmony without distractions."*
+
+The visual identity of Lyra reflects its core architectural tenets:
+- **Celestial Serenity**: Deep cosmic midnight tones paired with luminous accents to reduce visual fatigue during late-night listening.
+- **Organic Motion**: Living fluid canvas simulations represent the continuous, flowing nature of sound.
+- **High Legibility**: A sharp, refined icon silhouette engineered for clear identification across Windows taskbar, system tray, and high-DPI desktop displays.
+
+---
+
+## 📄 License &amp; Credits
+
+Lyra is open-source software distributed under the **[ISC License](package.json)**.
+
+- **Author**: Lyra Contributors &amp; [projectGloria](https://github.com/projectGloria)
+- **Built With**: [Tauri](https://tauri.app/), [Rust](https://www.rust-lang.org/), and [Lofty](https://github.com/Serial-ATA/lofty-rs)
+- **Ecosystem**: Part of the projectGloria repository collection alongside [Kintsugi](https://github.com/projectGloria/Kintsugi).
