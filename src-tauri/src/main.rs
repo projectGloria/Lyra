@@ -7,6 +7,7 @@ mod global_shortcuts;
 mod library_delta;
 mod liked;
 mod model;
+mod open_files;
 mod opener;
 mod playlist;
 mod scan;
@@ -410,12 +411,7 @@ fn set_global_shortcuts(app: tauri::AppHandle, bindings: Value) -> Value {
 // title-bar buttons must apply the tray preference before closing the window.
 #[tauri::command(async)]
 fn close_window(window: tauri::Window, state: tauri::State<AppState>) -> Result<(), String> {
-    if state.close_to_tray.load(Ordering::Relaxed) {
-        window.hide()
-    } else {
-        window.close()
-    }
-    .map_err(|error| error.to_string())
+    open_files::close_player(&window, state.close_to_tray.load(Ordering::Relaxed))
 }
 
 #[tauri::command(async)]
@@ -500,6 +496,16 @@ fn log_event(
 
 fn main() {
     tauri::Builder::default()
+        .manage(open_files::OpenFiles::default())
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            if let Err(error) = open_files::receive(
+                app,
+                &args.into_iter().skip(1).collect::<Vec<_>>(),
+                Path::new(&cwd),
+            ) {
+                eprintln!("File opening failed: {error}");
+            }
+        }))
         .system_tray(
             tauri::SystemTray::new().with_menu(
                 tauri::SystemTrayMenu::new()
@@ -522,11 +528,12 @@ fn main() {
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+                api.prevent_close();
                 let state = event.window().state::<AppState>();
-                if state.close_to_tray.load(Ordering::Relaxed) {
-                    api.prevent_close();
-                    let _ = event.window().hide();
-                }
+                let _ = open_files::close_player(
+                    event.window(),
+                    state.close_to_tray.load(Ordering::Relaxed),
+                );
             }
         })
         .setup(|app| {
@@ -550,6 +557,12 @@ fn main() {
                 playlist_lock: std::sync::Mutex::new(()),
                 close_to_tray: AtomicBool::new(saved["closeToTray"].as_bool().unwrap_or(false)),
             });
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let cwd = std::env::current_dir().unwrap_or_default();
+            if let Err(error) = open_files::receive(&app.handle(), &args, &cwd) {
+                eprintln!("File opening failed: {error}");
+                let _ = open_files::show_main(&app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -577,6 +590,12 @@ fn main() {
             minimize_window,
             set_window_fullscreen,
             set_global_shortcuts,
+            open_files::take_open_request,
+            open_files::opened_track_metadata,
+            open_files::compact_control,
+            open_files::publish_playback,
+            open_files::playback_snapshot,
+            open_files::show_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lyra");

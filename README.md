@@ -62,6 +62,26 @@ Named after the celestial constellation of the mythical lyre, **Lyra** is a stan
 
 ## ✨ Key Features
 
+### Open files from Windows Explorer
+
+Install the latest Lyra setup, then right-click an audio file and choose **Open with → Lyra**.
+To use double-click playback, select Lyra under **Choose another app** and choose **Always**
+(or select Lyra for that extension in Windows **Settings → Apps → Default apps**).
+Installing Lyra preserves your existing default-player choices.
+
+Explorer opens a compact Lyra player with artwork, play/pause, seeking, and volume.
+It shares playback with the library window: opening another file replaces the current
+playback selection. **Open Library** shows the full interface without interrupting music.
+Files can be anywhere on disk; opening them does not import their folders or change
+your library. Multiple command-line file arguments play as one selection in argument order.
+External selections are not restored on the next launch.
+
+For development, launch `lyra.exe "C:\Music\Song.mp3"` to test file opening directly.
+File associations are registered by the NSIS installer, not by `tauri dev`.
+The custom template in `src-tauri/installer/installer.nsi` is based on Tauri CLI 1.6.3;
+keep it aligned with the bundled CLI when upgrading. Its uninstall section removes
+Lyra's audio-handler registrations without changing other players' associations.
+
 <table>
   <tr>
     <td width="50%">

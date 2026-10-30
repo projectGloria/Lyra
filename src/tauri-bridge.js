@@ -11,7 +11,7 @@ const { open } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'avif', 'gif', 'bmp', 'ico', 'svg'];
-const looksLikeUrl = (value) => /^[a-z][a-z0-9+.-]+:/i.test(value);
+const looksLikeUrl = (value) => !/^[a-z]:[\\/]/i.test(value) && /^[a-z][a-z0-9+.-]+:/i.test(value);
 
 const toAssetUrl = (filePath) => {
   const value = String(filePath || '');
@@ -81,6 +81,22 @@ const chooseImage = async (title) => {
 window.spotfck = {
   toAssetUrl,
   fromAssetUrl,
+
+  // Subscribe before draining native state: notifications are wakeups, not payloads,
+  // so an Explorer launch during webview initialization cannot be lost or duplicated.
+  startFilePlayback: async (onRequest, onControl) => {
+    const drain = async () => {
+      const request = await invoke('take_open_request');
+      if (request) onRequest(mapLibraryUrls(request));
+    };
+    const stopFiles = await listen('files:pending', () => drain().catch(console.error));
+    const stopControls = await listen('compact:control', (event) => onControl(event.payload));
+    await drain();
+    return () => { stopFiles(); stopControls(); };
+  },
+  openedTrackMetadata: async (filePath, requestId) =>
+    mapLibraryUrls(await invoke('opened_track_metadata', { filePath, requestId })),
+  publishPlayback: (snapshot) => invoke('publish_playback', { snapshot }).catch(() => {}),
 
   readSettings: () => invoke('read_settings'),
   saveSettings: (settings) => invoke('save_settings', { settings }),

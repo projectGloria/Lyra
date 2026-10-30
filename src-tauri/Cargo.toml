@@ -31,6 +31,7 @@ sha1 = "0.10"
 rayon = "1.8"
 trash = "3.1"
 notify = "6.1"
+tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/plugins-workspace", rev = "1e407ed56455558cf751022fd68eca3b9e3713a0" }
 
 [features]
 # Used for production builds and whenever devPath points at the filesystem.

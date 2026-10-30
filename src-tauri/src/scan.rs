@@ -771,6 +771,21 @@ fn scan_directory(directory: &Path) -> Result<Vec<crate::util::DirectoryEntry>, 
     })
 }
 
+/// Read one explicitly opened file without walking or importing its folder.
+pub fn read_opened_track(file_path: &Path, data_dir: &Path) -> Track {
+    let artwork_directory = artwork_cache_directory(data_dir);
+    let cache = TrackCache::load(data_dir);
+    read_track(
+        file_path,
+        file_path.parent().unwrap_or(Path::new("")),
+        0,
+        &ArtworkIndex::new(),
+        &cache,
+        &artwork_directory,
+    )
+    .0
+}
+
 fn read_track(
     file_path: &Path,
     folder_path: &Path,

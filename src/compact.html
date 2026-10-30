@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lyra — Mini Player</title>
+  <link rel="stylesheet" href="compact.css" />
+</head>
+<body>
+  <header data-tauri-drag-region>
+    <span class="brand" data-tauri-drag-region>LYRA <span data-tauri-drag-region>MINI PLAYER</span></span>
+    <div class="window-actions">
+      <button id="minimize" aria-label="Minimize" title="Minimize">−</button>
+      <button id="close" aria-label="Close player" title="Close">×</button>
+    </div>
+  </header>
+  <main>
+    <div class="track">
+      <img id="artwork" src="assets/no-artwork.svg" alt="Track artwork" />
+      <div class="track-copy"><span class="eyebrow">NOW PLAYING</span><h1 id="title">Opening your music…</h1><p id="artist">Lyra</p></div>
+    </div>
+    <div class="timeline">
+      <input id="seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek" disabled />
+      <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+    </div>
+    <div class="controls">
+      <button id="play" class="play" aria-label="Play" disabled>▶</button>
+      <label class="volume">Vol<input id="volume" type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Volume" /></label>
+      <button id="library" class="library">Open Library <span aria-hidden="true">↗</span></button>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+  <script src="compact.js"></script>
+</body>
+</html>

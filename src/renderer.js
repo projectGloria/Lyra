@@ -444,7 +444,8 @@ window.addEventListener('unhandledrejection', (event) => {
   reportEvent('renderer.unhandled-rejection', { reason: event.reason?.stack || event.reason?.message || String(event.reason || 'Unknown rejection') }, 'error');
 });
 
-function showToast(message) {
+function showToast(message, { playback = false } = {}) {
+  if (playback && typeof publishCompactPlayback === 'function') publishCompactPlayback(message);
   const toast = document.getElementById('toast');
   toast.textContent = message;
   toast.classList.add('visible');
@@ -593,6 +594,11 @@ function normalizeLibrary(library) {
     tracksByPath.set(String(track.path || '').replaceAll('\\', '/').toLowerCase(), track);
   }
   allTracks = [...tracksById.values()];
+  // External selections remain addressable for playback/history, but never become
+  // library search results or persisted library membership.
+  if (typeof externalTracks !== 'undefined') {
+    for (const [id, track] of externalTracks) if (!tracksById.has(id)) tracksById.set(id, track);
+  }
   state.selectedTrackIds = new Set([...state.selectedTrackIds].filter((id) => tracksById.has(id)));
   if (state.selectedId !== 'liked' && !libraryFolderIndex.has(state.selectedId)) {
     state.selectedId = 'liked';
@@ -636,7 +642,7 @@ function applyLibraryDelta(library, delta) {
   library.folders = [...folders.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   libraryFolderIndex = new Map();
   for (const folder of library.folders) { libraryFolderIndex.set(folder.path, folder); libraryFolderIndex.set(folder.id, folder); }
-  if (membershipChanged) allTracks = [...tracksById.values()];
+  if (membershipChanged) allTracks = [...tracksById.values()].filter((track) => !track.external);
   albumCollectionsCache = null;
   likedTracksCache = null;
   Object.assign(library, { scannedAt: delta.scannedAt, folderCount: delta.folderCount, trackCount: delta.trackCount,
@@ -1249,6 +1255,7 @@ function queueSeekUi() {
 }
 
 function updatePlaybackUi({ trackChanged = false } = {}) {
+  if (typeof publishCompactPlayback === 'function') publishCompactPlayback();
   const playbackKey = `${state.currentTrack?.id || ''}:${audio.paused ? 'paused' : 'playing'}`;
   if (!trackChanged && playbackKey === lastPlaybackUiKey) return;
   lastPlaybackUiKey = playbackKey;
@@ -1336,6 +1343,7 @@ function renderNowPlaying() {
 // Liked Songs), not from what was clicked, so it stays right after queue jumps, restores and
 // rescans without another piece of playback state to keep in sync.
 function renderPlaylistContextCard(track) {
+  if (track.external) return '';
   const context = findTrackContext(track.id);
   if (!context) return '';
   const isLiked = context.libraryId === 'liked';
@@ -1802,7 +1810,7 @@ function readPlaybackSession() {
 }
 
 function writePlaybackPosition() {
-  if (!playbackSessionReady) return;
+  if (!playbackSessionReady || state.currentTrack?.external) return;
   try {
     localStorage.setItem(`${PLAYBACK_SESSION_KEY}-position`, JSON.stringify({
       currentPath: state.currentTrack?.path || '', position: Number(audio.currentTime || 0)
@@ -1812,23 +1820,23 @@ function writePlaybackPosition() {
 }
 
 function writePlaybackSessionNow() {
-  if (!playbackSessionReady) return;
+  if (!playbackSessionReady || state.currentTrack?.external) return;
   writePlaybackPosition();
   if (!playbackSessionDirty) return;
-  const base = state.basePlaybackList || [];
+  const base = (state.basePlaybackList || []).filter((track) => !track.external);
   const positions = new Map(base.map((track, index) => [track.id, index]));
   const payload = {
     currentPath: state.currentTrack?.path || '',
     playbackAnchorPath: state.playbackAnchorPath || '',
     position: Number(audio.currentTime || 0),
-    queuePaths: state.queue.map((track) => track.path),
+    queuePaths: state.queue.filter((track) => !track.external).map((track) => track.path),
     basePlaybackPaths: base.map((track) => track.path),
     playbackOrder: state.playbackList.map((track) => positions.get(track.id)).filter(Number.isInteger),
-    historyPaths: state.playbackHistory.map((id) => tracksById.get(id)?.path).filter(Boolean),
-    historyContexts: (state.playbackHistoryContexts || []).map((entry) => ({
+    historyPaths: state.playbackHistory.map((id) => tracksById.get(id)).filter((track) => track && !track.external).map((track) => track.path),
+    historyContexts: (state.playbackHistoryContexts || []).filter((entry) => !tracksById.get(entry.id)?.external).map((entry) => ({
       path: tracksById.get(entry.id)?.path, anchorPath: entry.anchorPath, fromQueue: entry.fromQueue
     })).filter((entry) => entry.path),
-    forwardContexts: (state.playbackForward || []).map((entry) => ({
+    forwardContexts: (state.playbackForward || []).filter((entry) => !tracksById.get(entry.id)?.external).map((entry) => ({
       path: tracksById.get(entry.id)?.path, anchorPath: entry.anchorPath, fromQueue: entry.fromQueue
     })).filter((entry) => entry.path),
     currentFromQueue: Boolean(state.currentFromQueue),
@@ -1984,7 +1992,7 @@ function setCurrentTrack(track, autoplay = false, playbackList = null, { addHist
   if (playPromise?.catch) {
     playPromise.catch((error) => {
       if (requestId !== playbackRequestId || state.currentTrack?.id !== track.id) return;
-      showToast(`Unable to play ${track.title || 'this file'}${error?.message ? `: ${error.message}` : ''}`);
+      showToast(`Unable to play ${track.title || 'this file'}${error?.message ? `: ${error.message}` : ''}`, { playback: true });
       updatePlaybackUi();
     });
   }
@@ -2001,6 +2009,7 @@ function playSelected() {
 function findTrackContext(id) {
   const track = tracksById.get(id);
   if (!track) return null;
+  if (track.external) return { track, queue: state.basePlaybackList.filter((item) => item.external), libraryId: '' };
   const folder = libraryFolderIndex.get(track.folderPath);
   return { track, queue: folder?.tracks || getLikedTracks(), libraryId: folder?.id || 'liked' };
 }
@@ -2010,7 +2019,7 @@ function playTrackById(id) {
   const context = findTrackContext(id);
   if (!context?.track) return showToast('Track not found in current view');
   const activeCollection = state.selectedTracks.some((track) => track.id === id) ? [...state.selectedTracks] : context.queue;
-  if (state.view?.type === 'playlist') state.selectedId = context.libraryId;
+  if (state.view?.type === 'playlist' && context.libraryId) state.selectedId = context.libraryId;
   state.selectedTracks = activeCollection;
   setPlaybackList(activeCollection, { resetHistory: true, activeTrack: context.track });
   renderLibrary();
@@ -2024,7 +2033,7 @@ function togglePlay() {
   if (!state.currentTrack) return playSelected();
   if (!state.currentTrack.url) return showToast('Demo preview: choose your music folder to play local audio');
   if (audio.paused) {
-    audio.play().catch((error) => showToast(`Unable to play this file${error?.message ? `: ${error.message}` : ''}`));
+    audio.play().catch((error) => showToast(`Unable to play this file${error?.message ? `: ${error.message}` : ''}`, { playback: true }));
   } else {
     audio.pause();
   }
@@ -2774,12 +2783,13 @@ async function chooseLibrary() {
 
 function reconcilePlaybackAfterLibraryRefresh(previousTrack, previousQueue, previousPlaybackList, previousBaseList) {
   const byPath = tracksByPath;
-  const remap = (tracks) => tracks.map((track) => byPath.get(String(track.path || '').replaceAll('\\', '/').toLowerCase())).filter(Boolean);
+  const lookup = (track) => track.external ? track : byPath.get(String(track.path || '').replaceAll('\\', '/').toLowerCase());
+  const remap = (tracks) => tracks.map(lookup).filter(Boolean);
   state.queue = remap(previousQueue);
   state.playbackList = remap(previousPlaybackList);
   state.basePlaybackList = remap(previousBaseList);
   if (previousTrack) {
-    state.currentTrack = byPath.get(String(previousTrack.path || '').replaceAll('\\', '/').toLowerCase()) || null;
+    state.currentTrack = lookup(previousTrack) || null;
     if (!state.currentTrack) { playbackRequestId += 1; audio.pause(); audio.removeAttribute('src'); audio.load(); }
   }
   state.playbackHistory = state.playbackHistory.filter((id) => tracksById.has(id));
@@ -3400,10 +3410,11 @@ function handlePlaybackError() {
   // Skipping past one bad file is helpful. Walking the entire library at one toast
   // every two seconds because a drive went away is not.
   if (state.consecutivePlaybackErrors >= 5) {
-    showToast('Playback stopped: several files in a row could not be read');
+    showToast('Playback stopped: several files in a row could not be read', { playback: true });
     return;
   }
-  showToast(`Playback error: ${track.title || 'track'} — ${detail}`);
+  showToast(`Playback error: ${track.title || 'track'} — ${detail}`, { playback: true });
+  if (track.external && state.playbackList.length <= 1 && !state.queue.length) return;
   const requestId = playbackRequestId;
   const timer = setTimeout(() => {
     if (playbackErrorTimer !== timer) return;
@@ -4086,6 +4097,7 @@ async function init() {
   state.playbackList = [];
   state.basePlaybackList = [];
   state.selectedId = 'liked';
+  await initFilePlayback();
   const cachedLibrary = await window.spotfck.readLibraryCache(state.settings.libraryPath || '');
   if (state.settings.libraryPath) window.spotfck.watchLibrary(state.settings.libraryPath).catch((error) => {
     reportEvent('library.watcher-start-failed', { error: String(error) }, 'warn');
@@ -4096,7 +4108,7 @@ async function init() {
     state.selectedId = 'liked';
     await loadLikedReferences().catch(() => false);
     state.selectedTracks = getSelectedItem()?.tracks || [];
-    restorePlaybackSession();
+    if (!playbackSessionReady) restorePlaybackSession();
     render();
     reportEvent('library.cache-loaded', { folders: state.library.folderCount, tracks: state.library.trackCount });
   } else {

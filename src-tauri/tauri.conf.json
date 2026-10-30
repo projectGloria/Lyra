@@ -43,6 +43,7 @@
     "windows": [
       {
         "label": "main",
+        "visible": false,
         "title": "Lyra",
         "width": 1440,
         "height": 900,
@@ -76,7 +77,8 @@
       "externalBin": [],
       "windows": {
         "nsis": {
-          "installMode": "currentUser"
+          "installMode": "currentUser",
+          "template": "installer/installer.nsi"
         }
       }
     },
