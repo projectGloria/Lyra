@@ -913,7 +913,7 @@ function renderSearchView(container) {
   container.innerHTML = `<div class="global-results-view">
     <div class="search-results-heading"><span class="eyebrow">SEARCH</span><h2>${rawQuery ? `Results for “${escapeHtml(rawQuery)}”` : 'Search your library'}</h2><p>${rawQuery ? `${resultCount} matching results` : 'Find songs, artists, albums and playlists.'}</p></div>
     ${rawQuery && resultCount ? `<div class="search-top-row">
-      ${top ? `<section class="top-result-section"><h3>Top result</h3><button class="top-result-card" data-action="play-track" data-track-id="${escapeHtml(top.id)}"><span class="top-result-art">${artMarkup(getArtworkForTrack(top), top.title, 'placeholder-art')}</span><strong>${escapeHtml(top.title)}</strong><span>${escapeHtml(top.artist)} · Song</span><b>SONG</b></button></section>` : ''}
+      ${top ? `<section class="top-result-section"><h3>Top result</h3><button class="top-result-card" data-action="play-track" data-track-id="${escapeHtml(top.id)}"><span class="top-result-art">${artMarkup(getArtworkForTrack(top), top.title, 'placeholder-art')}</span><strong>${escapeHtml(top.title)}</strong><span>${escapeHtml([top.artist, 'Song', trackPlaylistName(top)].filter(Boolean).join(' · '))}</span><b>SONG</b></button></section>` : ''}
       ${rails ? `<div class="search-rail-scroller">${rails}</div>` : ''}
     </div>
     ${tracks.length ? `<section class="search-songs-section"><div class="search-songs-header"><h3>Songs</h3>${tracks.length > 8 ? `<button class="secondary-button compact" data-action="toggle-search-all-songs">${state.searchShowAllSongs ? 'Show less' : `Show all (${tracks.length})`}</button>` : ''}</div><div class="search-song-list track-list"><div class="track-header"><span>#</span><span>Title</span><span>Artist</span><span>Album</span><span>◷</span></div><div class="track-virtual-body"></div></div></section>` : ''}` : rawQuery ? `<div class="search-empty"><span>${iconMarkup('search')}</span><h3>No results found</h3><p>Try another song, artist, album or playlist name.</p></div>` : ''}
@@ -971,13 +971,13 @@ function getSearchSuggestions(rawQuery, limit = 8) {
 
 function searchSuggestItemMarkup(item, index) {
   const wrap = (main, side = '') => `<div class="search-suggest-item" role="option" id="searchSuggest-${index}" aria-selected="false" data-suggest-index="${index}">${main}${side}</div>`;
-  const body = (art, title, meta, round = false) => `<span class="search-suggest-art${round ? ' round' : ''}">${art}</span><span class="search-suggest-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(meta)}</span></span>`;
+  const body = (art, title, meta, round = false) => `<span class="search-suggest-art${round ? ' round' : ''}">${art}</span><span class="search-suggest-copy"><strong>${escapeHtml(title)}</strong><span title="${escapeHtml(meta)}">${escapeHtml(meta)}</span></span>`;
   // Main buttons reuse the attributes the document-level click delegate already handles
   // (data-action / data-entity-type / data-home-library-id), so no new routing exists.
   if (item.kind === 'track') {
     const { track } = item;
     return wrap(
-      `<button type="button" class="search-suggest-main" tabindex="-1" data-action="play-track" data-track-id="${escapeHtml(track.id)}">${body(artMarkup(getArtworkForTrack(track), track.title, 'placeholder-art'), track.title, `Song • ${track.artist || 'Unknown artist'}`)}</button>`,
+      `<button type="button" class="search-suggest-main" tabindex="-1" data-action="play-track" data-track-id="${escapeHtml(track.id)}">${body(artMarkup(getArtworkForTrack(track), track.title, 'placeholder-art'), track.title, ['Song', track.artist || 'Unknown artist', trackPlaylistName(track)].filter(Boolean).join(' • '))}</button>`,
       `<button type="button" class="search-suggest-side" tabindex="-1" data-action="add-track-queue" data-track-id="${escapeHtml(track.id)}" aria-label="Add ${escapeHtml(track.title)} to queue" title="Add to queue">${iconMarkup('plus')}</button>`
     );
   }
@@ -1337,6 +1337,15 @@ function renderNowPlaying() {
     <div class="info-card"><div class="card-heading"><strong>Credits</strong><button type="button" class="text-entity-link" data-action="toggle-credits" aria-expanded="${state.creditsExpanded}">${state.creditsExpanded ? 'Show less' : 'Show all'}</button></div><div class="credit-line"><span>Artist</span><button class="text-entity-link strong" data-entity-type="artist" data-entity-value="${escapeHtml(track.artist)}">${escapeHtml(track.artist)}</button></div><div class="credit-line"><span>Album</span><button class="text-entity-link strong" data-entity-type="album" data-entity-value="${escapeHtml(albumIdentity(track))}">${escapeHtml(track.album)}</button></div>${state.creditsExpanded ? creditsDetailMarkup(track) : ''}</div>
     ${renderPlaylistContextCard(track)}
     <div class="queue-card"><button type="button" class="card-heading queue-heading-button" data-action="queue" aria-label="Open queue"><strong>Up next</strong><span>${state.queue.length ? `${state.queue.length} queued` : 'Open queue'}</span></button>${renderQueueItem()}</div>`;
+}
+
+// Which playlist a track lives in, by the same rule findTrackContext uses: its folder is
+// its playlist, and root files (no folder entry) are Liked Songs. A Map lookup, so it is
+// cheap enough to call per search row. External (Explorer-opened) files have none.
+function trackPlaylistName(track) {
+  if (!track || track.external) return '';
+  const folder = libraryFolderIndex.get(track.folderPath);
+  return folder ? folder.name || getPathLabel(track.folderPath) : 'Liked Songs';
 }
 
 // The playlist is derived from the track's folder (a folder *is* a playlist; root files are
@@ -1950,6 +1959,15 @@ function setCurrentTrack(track, autoplay = false, playbackList = null, { addHist
   restoreSeek = Number.isFinite(Number(resumePosition)) && Number(resumePosition) > 0
     ? { requestId, path: track.path, position: Number(resumePosition) } : null;
   if (!preserveForward) state.playbackForward = [];
+
+  // Repeat-one is a promise about *this* track. Any switch to a different one (manual pick,
+  // next/prev, queue, Explorer launch) means the user moved on, so drop it. Same-id reloads
+  // (metadata edits, playlist rewrites) and the cold-start restore (no previous id) keep it.
+  if (state.repeatMode === 'one' && previousTrackId && previousTrackId !== track.id) {
+    state.repeatMode = 'off';
+    updatePlaybackModeControls();
+    persistPlaybackSession();
+  }
 
   if (playbackList) setPlaybackList(playbackList);
   state.currentTrack = track;

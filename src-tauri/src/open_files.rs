@@ -134,6 +134,11 @@ pub fn receive(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<()
     }
     show_compact(app)?;
     if let Some(main) = app.get_window("main") {
+        // An Explorer launch is a "just play this file" request: the mini player is the
+        // whole UI. The main webview still owns the <audio> element, so hide it rather
+        // than close it; hidden webviews keep playing (same path as close-to-tray), and
+        // the compact player's Library button brings it back via show_main.
+        let _ = main.hide();
         let _ = main.emit("files:pending", ());
     }
     Ok(())
@@ -233,6 +238,18 @@ pub fn show_library(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn close_player(window: &tauri::Window, close_to_tray: bool) -> Result<(), String> {
+    if window.label() == "compact" {
+        // The mini player is never the last stop: an Explorer launch hid the library
+        // window, so treating "nothing else visible" as "quit" would kill the whole app
+        // (and the user's library session) just for dismissing the mini player. Hand back
+        // to the library window instead; in tray mode, stay in the tray like main does.
+        window.hide().map_err(|e| e.to_string())?;
+        return if close_to_tray {
+            Ok(())
+        } else {
+            show_main(&window.app_handle())
+        };
+    }
     let other = if window.label() == "main" {
         "compact"
     } else {

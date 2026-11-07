@@ -523,8 +523,9 @@ test('Previous and Next retrace consumed queue songs and their playlist anchors'
 test('search mounts a virtual collection and keeps a displayed song in the tab order', () => {
   const tracks = Array.from({ length: 50000 }, (_, i) => ({ ...track(String(i)), title: 'Song ' + i, _searchText: 'song' }));
   let mounted;
-  const app = load(['renderSearchView', 'uniqueByLabel', 'searchEntityGroupMarkup', 'albumIdentity', 'searchTokens', 'matchesTokens', 'trackSearchText'], {
+  const app = load(['renderSearchView', 'uniqueByLabel', 'searchEntityGroupMarkup', 'albumIdentity', 'searchTokens', 'matchesTokens', 'trackSearchText', 'trackPlaylistName'], {
     state: { query: 'song', library: { folders: [] }, searchShowAllSongs: true, focusedTrackId: 'missing' },
+    libraryFolderIndex: new Map(), getPathLabel: String,
     getAllTracks: () => tracks, getAlbumCollections: () => [], getArtworkForTrack: () => '',
     artMarkup: () => '', iconMarkup: () => '', escapeHtml: String,
     mountTrackCollection: (_, items) => { mounted = items; }
@@ -571,6 +572,33 @@ test('search suggestions token-match across fields and rank name matches first',
   assert.equal(app.getSearchSuggestions('galaxy').map(label).join('|'), 'track:Galaxy|playlist:Galaxy Hensonn|track:Into the Galaxy');
   assert.equal(label(app.getSearchSuggestions('hensonn')[0]), 'artist:Hensonn');
   assert.equal(app.getSearchSuggestions('   ').length, 0);
+});
+
+test('song suggestions name the playlist so same-titled songs are distinguishable', () => {
+  const app = load(['searchSuggestItemMarkup', 'trackPlaylistName'], {
+    libraryFolderIndex: new Map([['C:/Music/Gym', { id: 'f1', name: 'Gym' }], ['C:/Music/Unnamed', { id: 'f2', name: '' }]]),
+    getPathLabel: (path) => path.split('/').pop(), getArtworkForTrack: () => '', artMarkup: () => '', iconMarkup: () => '', escapeHtml: String
+  });
+  const song = (folderPath, extra = {}) => app.searchSuggestItemMarkup({ kind: 'track', track: { id: 'x', title: 'OK', artist: '8 Graves', folderPath, ...extra } }, 0);
+  assert.match(song('C:/Music/Gym'), /Song • 8 Graves • Gym</);
+  assert.match(song('C:/Music/Unnamed'), /Song • 8 Graves • Unnamed</, 'nameless folders fall back to their path label');
+  assert.match(song('C:/Music'), /Song • 8 Graves • Liked Songs</, 'root files live in Liked Songs');
+  assert.match(song('C:/Downloads', { external: true }), /Song • 8 Graves</, 'Explorer-opened files belong to no playlist');
+  assert.doesNotMatch(song('C:/Downloads', { external: true }), /Liked Songs/);
+});
+
+test('repeat-one turns off when a different track starts, but survives same-track reloads', () => {
+  const app = playback();
+  app.updatePlaybackModeControls = () => {};
+  app.state.repeatMode = 'one';
+  app.setCurrentTrack(app.a, true, null, { addHistory: false, preserveForward: true });
+  assert.equal(app.state.repeatMode, 'one', 'reloading the same track (tag edit, playlist rewrite) keeps it');
+  app.nextTrack();
+  assert.equal(app.state.currentTrack.id, 'B');
+  assert.equal(app.state.repeatMode, 'off');
+  app.state.repeatMode = 'all';
+  app.nextTrack();
+  assert.equal(app.state.repeatMode, 'all', 'repeat-all is a queue mode and is left alone');
 });
 
 test('a successful tag edit advances the delta baseline only when its base matches', async () => {
