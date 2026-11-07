@@ -583,8 +583,6 @@ test('song suggestions name the playlist so same-titled songs are distinguishabl
   assert.match(song('C:/Music/Gym'), /Song • 8 Graves • Gym</);
   assert.match(song('C:/Music/Unnamed'), /Song • 8 Graves • Unnamed</, 'nameless folders fall back to their path label');
   assert.match(song('C:/Music'), /Song • 8 Graves • Liked Songs</, 'root files live in Liked Songs');
-  assert.match(song('C:/Downloads', { external: true }), /Song • 8 Graves</, 'Explorer-opened files belong to no playlist');
-  assert.doesNotMatch(song('C:/Downloads', { external: true }), /Liked Songs/);
 });
 
 test('repeat-one turns off when a different track starts, but survives same-track reloads', () => {

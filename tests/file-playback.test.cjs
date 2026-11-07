@@ -3,188 +3,139 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../src/file-playback.js'), 'utf8');
-const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8').replace(/\r\n/g, '\n');
+const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8').replace(/\r\n/g, '\n');
 const flush = () => new Promise(setImmediate);
-const song = (id) => ({ id, path: `C:\\Outside music\\${id}.mp3`, title: id, url: `asset:${id}` });
-function load() {
+const song = (id) => ({ id, path: `C:\\Outside music\\${id}.mp3`, title: id });
+
+// Boots compact.js against fake DOM/Tauri globals and exposes what it does to its <audio>.
+function loadMini(pending = []) {
+  const listeners = new Map();
+  const invoked = [];
   const metadata = new Map();
-  const snapshots = [];
-  const events = {};
+  const audios = [];
+  const elements = new Map();
+  const element = () => ({
+    textContent: '', title: '', value: '', max: '', disabled: false, tagName: 'DIV', attrs: {},
+    addEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return k === 'src' ? this.src : this.attrs[k]; }
+  });
+  class FakeAudio {
+    constructor() { this.paused = true; this.currentTime = 0; this.duration = NaN; this.volume = 1; this.events = {}; this.played = []; audios.push(this); }
+    addEventListener(name, fn) { this.events[name] = fn; }
+    getAttribute(name) { return name === 'src' ? this.src : null; }
+    play() { this.paused = false; this.played.push(this.src); return Promise.resolve(); }
+    pause() { this.paused = true; }
+  }
   const context = {
-    state: { settings: {}, currentTrack: null, queue: [song('queued')], playbackList: [], basePlaybackList: [] },
-    tracksById: new Map(), playbackSessionReady: false,
-    audio: { paused: true, currentTime: 0, duration: NaN, volume: 0.5, addEventListener(name, fn) { events[name] = fn; } },
-    window: { spotfck: {
-      publishPlayback: (snapshot) => snapshots.push(snapshot),
-      openedTrackMetadata: (file, id) => new Promise((resolve) => metadata.set(`${id}:${file}`, resolve)),
-      startFilePlayback: async () => {}
-    } },
-    setPlaybackList(tracks) { context.state.playbackList = [...tracks]; context.state.basePlaybackList = [...tracks]; },
-    setCurrentTrack(track, autoplay) { context.state.currentTrack = track; context.audio.paused = !autoplay; },
-    setVolume(value) { context.audio.volume = Math.max(0, Math.min(1, value)); },
-    updateMediaSession() {}, updatePlaybackUi() {}, updateSeekUi() {},
-    togglePlay() { context.audio.paused = !context.audio.paused; },
-    Date, Number, Map
+    Audio: FakeAudio, setTimeout: (fn) => fn(),
+    navigator: {}, localStorage: { getItem: () => null, setItem() {} },
+    document: {
+      documentElement: { style: { setProperty() {} } }, addEventListener() {},
+      getElementById: (id) => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }
+    },
+    window: { addEventListener() {}, __TAURI__: {
+      tauri: {
+        convertFileSrc: (file) => `asset:${file}`,
+        async invoke(name, args) {
+          invoked.push(name);
+          if (name === 'take_open_request') return pending.shift() || null;
+          if (name === 'opened_track_metadata') return new Promise((resolve) => metadata.set(`${args.requestId}:${args.filePath}`, resolve));
+          return {};
+        }
+      },
+      event: { async listen(name, fn) { listeners.set(name, fn); return () => {}; } },
+      window: { appWindow: {} }
+    } }
   };
   vm.createContext(context);
-  vm.runInContext(source, context);
-  return { context, metadata, snapshots, events };
+  vm.runInContext(read('src/compact.js'), context);
+  const deliver = async (request) => { pending.push(request); listeners.get('files:pending')(); await flush(); };
+  return { audio: audios[0], elements, invoked, metadata, listeners, deliver };
 }
 
-test('opens external selections immediately without waiting for metadata or library setup', async () => {
-  const { context, metadata } = load();
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a'), song('b')], errors: [] });
-  assert.equal(context.state.currentTrack.id, 'a');
-  assert.equal(context.audio.paused, false);
-  assert.equal(context.state.queue.length, 0);
-  assert.equal(context.state.playbackList.length, 2);
-  assert.equal(context.playbackSessionReady, true);
-  assert.equal(metadata.size, 2);
-});
-
-test('stale metadata and duplicate delivery cannot overwrite a newer file selection', async () => {
-  const { context, metadata } = load();
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a')] });
-  context.handleOpenedFiles({ id: 2, tracks: [song('b')] });
-  metadata.get(`1:${song('a').path}`)({ ...song('a'), title: 'Old metadata' });
+test('the mini player plays opened files on its own <audio>, not through the library', async () => {
+  const mini = loadMini([{ id: 1, tracks: [song('a'), song('b')], errors: [] }]);
   await flush();
-  assert.equal(context.state.currentTrack.id, 'b');
-  context.handleOpenedFiles({ id: 1, tracks: [song('a')] });
-  context.handleOpenedFiles({ id: 2, tracks: [song('a')] });
-  assert.equal(context.state.currentTrack.id, 'b');
-  metadata.get(`2:${song('b').path}`)({ ...song('b'), title: 'New title' });
+  assert.equal(mini.audio.paused, false);
+  assert.equal(mini.audio.src, `asset:${song('a').path}`);
+  assert.equal(mini.elements.get('title').textContent, 'a');
+  // Only its own native calls: no compact_control / publish_playback round-trips via main.
+  assert.deepEqual([...new Set(mini.invoked)].sort(), ['opened_track_metadata', 'read_settings', 'take_open_request']);
+});
+
+test('a multi-file selection advances on end and stops after the last file', async () => {
+  const mini = loadMini([{ id: 1, tracks: [song('a'), song('b')] }]);
   await flush();
-  assert.equal(context.state.currentTrack.title, 'New title');
-  assert.equal(context.state.playbackList[0].title, 'New title');
+  mini.audio.events.ended();
+  assert.equal(mini.audio.src, `asset:${song('b').path}`);
+  mini.audio.events.ended();
+  assert.equal(mini.audio.paused, true);
+  assert.equal(mini.audio.played.length, 2);
 });
 
-test('invalid requests preserve playback and publish an error to the compact window', async () => {
-  const { context, snapshots } = load();
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a')] });
-  context.handleOpenedFiles({ id: 2, tracks: [], errors: ['File is missing'] });
-  assert.equal(context.state.currentTrack.id, 'a');
-  assert.equal(context.audio.paused, false);
-  assert.equal(snapshots.at(-1).message, 'File is missing');
-});
-
-test('metadata finishing after Next enriches its track without restarting playback', async () => {
-  const { context, metadata } = load();
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a'), song('b')] });
-  context.state.currentTrack = context.state.playbackList[1];
-  metadata.get(`1:${song('a').path}`)({ ...song('a'), title: 'Title a' });
+test('stale metadata and duplicate delivery cannot overwrite a newer selection', async () => {
+  const mini = loadMini([{ id: 1, tracks: [song('a')] }]);
   await flush();
-  assert.equal(context.state.currentTrack.id, 'b');
-  assert.equal(context.state.playbackList[0].title, 'Title a');
+  await mini.deliver({ id: 2, tracks: [song('b')] });
+  mini.metadata.get(`1:${song('a').path}`)({ ...song('a'), title: 'Old metadata' });
+  await flush();
+  assert.equal(mini.elements.get('title').textContent, 'b');
+  await mini.deliver({ id: 1, tracks: [song('a')] });
+  assert.equal(mini.audio.src, `asset:${song('b').path}`);
+  mini.metadata.get(`2:${song('b').path}`)({ ...song('b'), title: 'New title', artworkPath: 'C:\\cache\\b.jpg' });
+  await flush();
+  assert.equal(mini.elements.get('title').textContent, 'New title');
+  assert.equal(mini.elements.get('artwork').src, 'asset:C:\\cache\\b.jpg');
 });
 
-test('compact controls drive the owner and clamp seek and volume', async () => {
-  const { context } = load();
-  await context.initFilePlayback();
-  context.audio.duration = 100;
-  context.handleCompactControl({ action: 'seek', value: 120 });
-  assert.equal(context.audio.currentTime, 100);
-  context.handleCompactControl({ action: 'seek', value: -10 });
-  assert.equal(context.audio.currentTime, 0);
-  context.handleCompactControl({ action: 'volume', value: 2 });
-  assert.equal(context.audio.volume, 1);
-  context.handleCompactControl({ action: 'togglePlay' });
-  assert.equal(context.audio.paused, false);
-  context.handleCompactControl({ action: 'seek', value: NaN });
-  assert.equal(context.audio.currentTime, 0);
+test('an invalid request shows its error and keeps the current file playing', async () => {
+  const mini = loadMini([{ id: 1, tracks: [song('a')] }]);
+  await flush();
+  await mini.deliver({ id: 2, tracks: [], errors: ['File is missing'] });
+  assert.equal(mini.audio.paused, false);
+  assert.equal(mini.audio.src, `asset:${song('a').path}`);
+  assert.equal(mini.elements.get('message').textContent, 'File is missing');
 });
 
-test('library reconciliation retains external playback while removing deleted library tracks', () => {
-  const external = { ...song('external'), external: true };
-  const removed = song('removed');
-  const context = {
-    state: { playbackHistory: [external.id], playbackHistoryContexts: [], playbackForward: [] },
-    tracksByPath: new Map(), tracksById: new Map([[external.id, external]]),
-    audio: { pause() { throw Error('External playback must continue'); } },
-    updateMediaSession() {}, persistPlaybackSession() {}
-  };
-  const start = renderer.indexOf('function reconcilePlaybackAfterLibraryRefresh(');
-  vm.runInNewContext(renderer.slice(start, renderer.indexOf('\n}\n', start) + 2), context);
-  context.reconcilePlaybackAfterLibraryRefresh(external, [external, removed], [external], [external]);
-  assert.equal(context.state.currentTrack, external);
-  assert.equal(context.state.queue.length, 1);
-  assert.equal(context.state.playbackList[0], external);
+test('the mini player subscribes before draining so a launch during load is not lost', async () => {
+  const mini = loadMini([{ id: 1, tracks: [song('a')] }]);
+  await flush();
+  assert.ok(mini.listeners.has('files:pending'));
+  assert.equal(mini.audio.played.length, 1);
 });
 
-test('external playback never overwrites persisted library sessions', () => {
-  const context = {
-    state: { currentTrack: { ...song('external'), external: true } }, playbackSessionReady: true,
-    localStorage: { setItem() { throw Error('External playback must not be persisted'); } }
-  };
-  for (const name of ['writePlaybackPosition', 'writePlaybackSessionNow']) {
-    const start = renderer.indexOf(`function ${name}(`);
-    vm.runInNewContext(renderer.slice(start, renderer.indexOf('\n}\n', start) + 2), context);
-    context[name]();
-  }
+test('the library only pauses when a file is opened, and never resumes', async () => {
+  let handler;
+  const audio = { paused: false, pause() { this.paused = true; }, play() { throw Error('Library must not resume'); } };
+  const context = { audio, window: { spotfck: { onExternalPlayback: async (fn) => { handler = fn; } } } };
+  vm.runInNewContext(read('src/file-playback.js') + '\ninitFilePlayback();', context);
+  await flush();
+  handler();
+  assert.equal(audio.paused, true);
+  handler(); // Already paused: a second Explorer launch is a no-op, not a toggle.
+  assert.equal(audio.paused, true);
 });
 
-test('startup subscribes before draining and consumes a request only once across wakeups', async () => {
-  let pending = { id: 1, tracks: [song('a')] };
-  const listeners = new Map();
-  const requests = [];
-  const calls = [];
+test('the bridge exposes the pause nudge and no longer lets the library consume files', async () => {
+  const listened = [];
   const context = { URL, console, window: { __TAURI__: {
-    tauri: { async invoke(name) { calls.push(name); const result = pending; pending = null; return result; }, convertFileSrc: (s) => `asset:${s}` },
-    window: { appWindow: {} }, dialog: {}, event: { async listen(name, handler) { listeners.set(name, handler); calls.push(name); return () => {}; } }
+    tauri: { invoke: async () => null, convertFileSrc: (s) => s }, window: { appWindow: {} }, dialog: {},
+    event: { async listen(name) { listened.push(name); return () => {}; } }
   } } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/tauri-bridge.js'), 'utf8'), context);
-  await context.window.spotfck.startFilePlayback((r) => requests.push(r), () => {});
-  listeners.get('files:pending')();
-  await flush();
-  assert.deepEqual(calls.slice(0, 3), ['files:pending', 'compact:control', 'take_open_request']);
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].tracks[0].url, `asset:${song('a').path}`);
+  vm.runInNewContext(read('src/tauri-bridge.js'), context);
+  await context.window.spotfck.onExternalPlayback(() => {});
+  assert.deepEqual(listened, ['external:pause']);
+  for (const gone of ['startFilePlayback', 'openedTrackMetadata', 'publishPlayback']) assert.equal(context.window.spotfck[gone], undefined);
 });
 
-test('opening a known library track keeps its normal library entry intact', async () => {
-  const { context } = load();
-  const libraryTrack = song('a');
-  context.tracksById.set(libraryTrack.id, libraryTrack);
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a')] });
-  assert.equal(context.state.currentTrack.external, true);
-  assert.equal(context.tracksById.get('a'), libraryTrack);
-  assert.equal(libraryTrack.external, undefined);
-});
-
-test('a replacement selection releases old external index entries', async () => {
-  const { context } = load();
-  await context.initFilePlayback();
-  context.handleOpenedFiles({ id: 1, tracks: [song('a')] });
-  context.handleOpenedFiles({ id: 2, tracks: [song('b')] });
-  assert.equal(context.tracksById.has('a'), false);
-  assert.equal(context.tracksById.get('b'), context.state.currentTrack);
-});
-
-test('ordinary library notices cannot overwrite compact playback errors', () => {
-  const published = [];
-  const toast = { classList: { add() {}, remove() {} } };
-  const context = {
-    publishCompactPlayback: (text) => published.push(text),
-    document: { getElementById: () => toast },
-    clearTimeout() {}, setTimeout() {}, toastTimer: null
-  };
-  const start = renderer.indexOf('function showToast(');
-  vm.runInNewContext(renderer.slice(start, renderer.indexOf('\n}\n', start) + 2), context);
-  context.showToast('Playback error', { playback: true });
-  context.showToast('Library updated');
-  assert.deepEqual(published, ['Playback error']);
-});
-
-test('external tracks do not display a misleading library playlist card', () => {
-  const context = {};
-  const start = renderer.indexOf('function renderPlaylistContextCard(');
-  vm.runInNewContext(renderer.slice(start, renderer.indexOf('\n}\n', start) + 2), context);
-  assert.equal(context.renderPlaylistContextCard({ ...song('a'), external: true }), '');
+test('native: Explorer launches leave the library window alone; closing destroys the mini player', () => {
+  const native = read('src-tauri/src/open_files.rs');
+  const receive = native.slice(native.indexOf('pub fn receive('), native.indexOf('#[tauri::command]'));
+  assert.doesNotMatch(receive, /main\.hide\(\)/);
+  assert.match(receive, /main\.emit\("external:pause"/);
+  assert.match(native, /fn take_open_request[\s\S]*?window\.label\(\) != "compact"/);
+  const compactClose = native.slice(native.indexOf('if window.label() == "compact" {'), native.indexOf('// Library window.'));
+  assert.match(compactClose, /window\.close\(\)/, 'hidden webviews keep playing, so the mini player must be destroyed');
+  assert.doesNotMatch(compactClose, /show_main|hide\(\)/, 'dismissing the mini player must not surface the library');
 });
 
 test('NSIS registers and removes every supported extension without claiming defaults', () => {

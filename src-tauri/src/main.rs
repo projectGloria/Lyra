@@ -528,11 +528,21 @@ fn main() {
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
-                api.prevent_close();
                 let state = event.window().state::<AppState>();
+                let close_to_tray = state.close_to_tray.load(Ordering::Relaxed);
+                if event.window().label() == "compact" {
+                    // OS-initiated close (Alt+F4, taskbar): let it through so the webview
+                    // and its <audio> are destroyed. Routing it via close_player would
+                    // call close() again from inside CloseRequested.
+                    if open_files::compact_close_exits(&event.window().app_handle(), close_to_tray) {
+                        event.window().app_handle().exit(0);
+                    }
+                    return;
+                }
+                api.prevent_close();
                 let _ = open_files::close_player(
                     event.window(),
-                    state.close_to_tray.load(Ordering::Relaxed),
+                    close_to_tray,
                 );
             }
         })
@@ -592,9 +602,6 @@ fn main() {
             set_global_shortcuts,
             open_files::take_open_request,
             open_files::opened_track_metadata,
-            open_files::compact_control,
-            open_files::publish_playback,
-            open_files::playback_snapshot,
             open_files::show_library,
         ])
         .run(tauri::generate_context!())

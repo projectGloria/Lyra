@@ -69,12 +69,14 @@ To use double-click playback, select Lyra under **Choose another app** and choos
 (or select Lyra for that extension in Windows **Settings → Apps → Default apps**).
 Installing Lyra preserves your existing default-player choices.
 
-Explorer opens a compact Lyra player with artwork, play/pause, seeking, and volume.
-It shares playback with the library window: opening another file replaces the current
-playback selection. **Open Library** shows the full interface without interrupting music.
+Explorer opens a standalone mini player with artwork, play/pause, seeking, and volume.
+The mini player has its own playback, separate from the library window. If the library
+is playing, it pauses. Its queue, position, and window are left exactly as they were, and
+closing the mini player does not resume it. Closing the mini player stops its file. If
+the library window was never opened (and close-to-tray is off), Lyra exits.
 Files can be anywhere on disk; opening them does not import their folders or change
-your library. Multiple command-line file arguments play as one selection in argument order.
-External selections are not restored on the next launch.
+your library. Multiple command-line file arguments play in argument order.
+Mini player selections are not restored on the next launch.
 
 For development, launch `lyra.exe "C:\Music\Song.mp3"` to test file opening directly.
 File associations are registered by the NSIS installer, not by `tauri dev`.

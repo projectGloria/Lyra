@@ -82,21 +82,8 @@ window.spotfck = {
   toAssetUrl,
   fromAssetUrl,
 
-  // Subscribe before draining native state: notifications are wakeups, not payloads,
-  // so an Explorer launch during webview initialization cannot be lost or duplicated.
-  startFilePlayback: async (onRequest, onControl) => {
-    const drain = async () => {
-      const request = await invoke('take_open_request');
-      if (request) onRequest(mapLibraryUrls(request));
-    };
-    const stopFiles = await listen('files:pending', () => drain().catch(console.error));
-    const stopControls = await listen('compact:control', (event) => onControl(event.payload));
-    await drain();
-    return () => { stopFiles(); stopControls(); };
-  },
-  openedTrackMetadata: async (filePath, requestId) =>
-    mapLibraryUrls(await invoke('opened_track_metadata', { filePath, requestId })),
-  publishPlayback: (snapshot) => invoke('publish_playback', { snapshot }).catch(() => {}),
+  // Fired when Explorer opens a file into the mini player. The library only pauses.
+  onExternalPlayback: (callback) => listen('external:pause', () => callback()),
 
   readSettings: () => invoke('read_settings'),
   saveSettings: (settings) => invoke('save_settings', { settings }),

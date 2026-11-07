@@ -1,9 +1,10 @@
-//! Explorer launches and compact-player IPC. The main webview remains the audio owner.
+//! Explorer launches and the mini player. The mini player is a self-contained player with
+//! its own webview and <audio>; the library window is never asked to play these files. The
+//! only cross-window effect is a one-way "pause" nudge so two tracks don't play at once.
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
-use serde_json::{json, Value};
 use tauri::Manager;
 
 use crate::model::Track;
@@ -27,7 +28,6 @@ struct Requests {
 #[derive(Default)]
 pub struct OpenFiles {
     requests: Mutex<Requests>,
-    snapshot: Mutex<Value>,
 }
 
 pub fn fallback_track(path: &Path) -> Track {
@@ -133,13 +133,16 @@ pub fn receive(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<()
         });
     }
     show_compact(app)?;
+    if let Some(compact) = app.get_window("compact") {
+        // A wakeup, not a payload: the compact page drains via take_open_request, so a
+        // freshly created window that isn't listening yet still picks it up on load.
+        let _ = compact.emit("files:pending", ());
+    }
     if let Some(main) = app.get_window("main") {
-        // An Explorer launch is a "just play this file" request: the mini player is the
-        // whole UI. The main webview still owns the <audio> element, so hide it rather
-        // than close it; hidden webviews keep playing (same path as close-to-tray), and
-        // the compact player's Library button brings it back via show_main.
-        let _ = main.hide();
-        let _ = main.emit("files:pending", ());
+        // Deliberately the *only* thing the library hears about: pause, nothing else. No
+        // hide, no queue swap, no resume later — the library's session stays exactly as
+        // the user left it, and continuing it is a manual decision.
+        let _ = main.emit("external:pause", ());
     }
     Ok(())
 }
@@ -149,8 +152,8 @@ pub fn take_open_request(
     window: tauri::Window,
     state: tauri::State<OpenFiles>,
 ) -> Result<Option<OpenRequest>, String> {
-    if window.label() != "main" {
-        return Err("Only the playback owner may consume files".into());
+    if window.label() != "compact" {
+        return Err("Only the mini player may consume opened files".into());
     }
     Ok(state
         .requests
@@ -184,83 +187,41 @@ pub fn opened_track_metadata(
 }
 
 #[tauri::command]
-pub fn compact_control(
-    app: tauri::AppHandle,
-    action: String,
-    value: Option<f64>,
-) -> Result<(), String> {
-    if !matches!(
-        action.as_str(),
-        "togglePlay" | "seek" | "volume" | "snapshot"
-    ) {
-        return Err("Unknown player control".into());
-    }
-    app.get_window("main")
-        .ok_or("Playback is unavailable")?
-        .emit(
-            "compact:control",
-            json!({ "action": action, "value": value }),
-        )
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn publish_playback(
-    window: tauri::Window,
-    app: tauri::AppHandle,
-    state: tauri::State<OpenFiles>,
-    snapshot: Value,
-) -> Result<(), String> {
-    if window.label() != "main" {
-        return Err("Only the playback owner may publish state".into());
-    }
-    *state.snapshot.lock().unwrap_or_else(|e| e.into_inner()) = snapshot.clone();
-    if let Some(window) = app.get_window("compact") {
-        window
-            .emit("playback:state", snapshot)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn playback_snapshot(state: tauri::State<OpenFiles>) -> Value {
-    state
-        .snapshot
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-}
-
-#[tauri::command]
 pub fn show_library(app: tauri::AppHandle) -> Result<(), String> {
     show_main(&app)
 }
 
-pub fn close_player(window: &tauri::Window, close_to_tray: bool) -> Result<(), String> {
-    if window.label() == "compact" {
-        // The mini player is never the last stop: an Explorer launch hid the library
-        // window, so treating "nothing else visible" as "quit" would kill the whole app
-        // (and the user's library session) just for dismissing the mini player. Hand back
-        // to the library window instead; in tray mode, stay in the tray like main does.
-        window.hide().map_err(|e| e.to_string())?;
-        return if close_to_tray {
-            Ok(())
-        } else {
-            show_main(&window.app_handle())
-        };
-    }
-    let other = if window.label() == "main" {
-        "compact"
-    } else {
-        "main"
-    };
-    let other_visible = window
-        .app_handle()
-        .get_window(other)
+/// Whether dismissing the mini player should take the whole app down: true only when it
+/// was the sole thing on screen (a cold Explorer launch never shows the library) and the
+/// user hasn't opted into living in the tray.
+pub fn compact_close_exits(app: &tauri::AppHandle, close_to_tray: bool) -> bool {
+    let library_visible = app
+        .get_window("main")
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    if close_to_tray || other_visible {
+    !close_to_tray && !library_visible
+}
+
+pub fn close_player(window: &tauri::Window, close_to_tray: bool) -> Result<(), String> {
+    if window.label() == "compact" {
+        // Destroy, don't hide: the mini player owns its <audio>, and a hidden webview
+        // keeps playing. Tearing the window down is the only reliable "stop". The library
+        // window is left exactly as it was (no show, no resume).
+        if compact_close_exits(&window.app_handle(), close_to_tray) {
+            window.app_handle().exit(0);
+            return Ok(());
+        }
+        return window.close().map_err(|e| e.to_string());
+    }
+    // Library window. If the mini player is up, only hide: exiting would kill the song the
+    // user is listening to there. Once the mini player closes, compact_close_exits sees
+    // the hidden library and lets the app go.
+    let mini_visible = window
+        .app_handle()
+        .get_window("compact")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    if close_to_tray || mini_visible {
         window.hide().map_err(|e| e.to_string())
     } else {
         window.app_handle().exit(0);

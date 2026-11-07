@@ -444,8 +444,7 @@ window.addEventListener('unhandledrejection', (event) => {
   reportEvent('renderer.unhandled-rejection', { reason: event.reason?.stack || event.reason?.message || String(event.reason || 'Unknown rejection') }, 'error');
 });
 
-function showToast(message, { playback = false } = {}) {
-  if (playback && typeof publishCompactPlayback === 'function') publishCompactPlayback(message);
+function showToast(message) {
   const toast = document.getElementById('toast');
   toast.textContent = message;
   toast.classList.add('visible');
@@ -594,11 +593,6 @@ function normalizeLibrary(library) {
     tracksByPath.set(String(track.path || '').replaceAll('\\', '/').toLowerCase(), track);
   }
   allTracks = [...tracksById.values()];
-  // External selections remain addressable for playback/history, but never become
-  // library search results or persisted library membership.
-  if (typeof externalTracks !== 'undefined') {
-    for (const [id, track] of externalTracks) if (!tracksById.has(id)) tracksById.set(id, track);
-  }
   state.selectedTrackIds = new Set([...state.selectedTrackIds].filter((id) => tracksById.has(id)));
   if (state.selectedId !== 'liked' && !libraryFolderIndex.has(state.selectedId)) {
     state.selectedId = 'liked';
@@ -642,7 +636,7 @@ function applyLibraryDelta(library, delta) {
   library.folders = [...folders.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   libraryFolderIndex = new Map();
   for (const folder of library.folders) { libraryFolderIndex.set(folder.path, folder); libraryFolderIndex.set(folder.id, folder); }
-  if (membershipChanged) allTracks = [...tracksById.values()].filter((track) => !track.external);
+  if (membershipChanged) allTracks = [...tracksById.values()];
   albumCollectionsCache = null;
   likedTracksCache = null;
   Object.assign(library, { scannedAt: delta.scannedAt, folderCount: delta.folderCount, trackCount: delta.trackCount,
@@ -1255,7 +1249,6 @@ function queueSeekUi() {
 }
 
 function updatePlaybackUi({ trackChanged = false } = {}) {
-  if (typeof publishCompactPlayback === 'function') publishCompactPlayback();
   const playbackKey = `${state.currentTrack?.id || ''}:${audio.paused ? 'paused' : 'playing'}`;
   if (!trackChanged && playbackKey === lastPlaybackUiKey) return;
   lastPlaybackUiKey = playbackKey;
@@ -1341,9 +1334,9 @@ function renderNowPlaying() {
 
 // Which playlist a track lives in, by the same rule findTrackContext uses: its folder is
 // its playlist, and root files (no folder entry) are Liked Songs. A Map lookup, so it is
-// cheap enough to call per search row. External (Explorer-opened) files have none.
+// cheap enough to call per search row.
 function trackPlaylistName(track) {
-  if (!track || track.external) return '';
+  if (!track) return '';
   const folder = libraryFolderIndex.get(track.folderPath);
   return folder ? folder.name || getPathLabel(track.folderPath) : 'Liked Songs';
 }
@@ -1352,7 +1345,6 @@ function trackPlaylistName(track) {
 // Liked Songs), not from what was clicked, so it stays right after queue jumps, restores and
 // rescans without another piece of playback state to keep in sync.
 function renderPlaylistContextCard(track) {
-  if (track.external) return '';
   const context = findTrackContext(track.id);
   if (!context) return '';
   const isLiked = context.libraryId === 'liked';
@@ -1819,7 +1811,7 @@ function readPlaybackSession() {
 }
 
 function writePlaybackPosition() {
-  if (!playbackSessionReady || state.currentTrack?.external) return;
+  if (!playbackSessionReady) return;
   try {
     localStorage.setItem(`${PLAYBACK_SESSION_KEY}-position`, JSON.stringify({
       currentPath: state.currentTrack?.path || '', position: Number(audio.currentTime || 0)
@@ -1829,23 +1821,23 @@ function writePlaybackPosition() {
 }
 
 function writePlaybackSessionNow() {
-  if (!playbackSessionReady || state.currentTrack?.external) return;
+  if (!playbackSessionReady) return;
   writePlaybackPosition();
   if (!playbackSessionDirty) return;
-  const base = (state.basePlaybackList || []).filter((track) => !track.external);
+  const base = state.basePlaybackList || [];
   const positions = new Map(base.map((track, index) => [track.id, index]));
   const payload = {
     currentPath: state.currentTrack?.path || '',
     playbackAnchorPath: state.playbackAnchorPath || '',
     position: Number(audio.currentTime || 0),
-    queuePaths: state.queue.filter((track) => !track.external).map((track) => track.path),
+    queuePaths: state.queue.map((track) => track.path),
     basePlaybackPaths: base.map((track) => track.path),
     playbackOrder: state.playbackList.map((track) => positions.get(track.id)).filter(Number.isInteger),
-    historyPaths: state.playbackHistory.map((id) => tracksById.get(id)).filter((track) => track && !track.external).map((track) => track.path),
-    historyContexts: (state.playbackHistoryContexts || []).filter((entry) => !tracksById.get(entry.id)?.external).map((entry) => ({
+    historyPaths: state.playbackHistory.map((id) => tracksById.get(id)).filter(Boolean).map((track) => track.path),
+    historyContexts: (state.playbackHistoryContexts || []).map((entry) => ({
       path: tracksById.get(entry.id)?.path, anchorPath: entry.anchorPath, fromQueue: entry.fromQueue
     })).filter((entry) => entry.path),
-    forwardContexts: (state.playbackForward || []).filter((entry) => !tracksById.get(entry.id)?.external).map((entry) => ({
+    forwardContexts: (state.playbackForward || []).map((entry) => ({
       path: tracksById.get(entry.id)?.path, anchorPath: entry.anchorPath, fromQueue: entry.fromQueue
     })).filter((entry) => entry.path),
     currentFromQueue: Boolean(state.currentFromQueue),
@@ -2010,7 +2002,7 @@ function setCurrentTrack(track, autoplay = false, playbackList = null, { addHist
   if (playPromise?.catch) {
     playPromise.catch((error) => {
       if (requestId !== playbackRequestId || state.currentTrack?.id !== track.id) return;
-      showToast(`Unable to play ${track.title || 'this file'}${error?.message ? `: ${error.message}` : ''}`, { playback: true });
+      showToast(`Unable to play ${track.title || 'this file'}${error?.message ? `: ${error.message}` : ''}`);
       updatePlaybackUi();
     });
   }
@@ -2027,7 +2019,6 @@ function playSelected() {
 function findTrackContext(id) {
   const track = tracksById.get(id);
   if (!track) return null;
-  if (track.external) return { track, queue: state.basePlaybackList.filter((item) => item.external), libraryId: '' };
   const folder = libraryFolderIndex.get(track.folderPath);
   return { track, queue: folder?.tracks || getLikedTracks(), libraryId: folder?.id || 'liked' };
 }
@@ -2051,7 +2042,7 @@ function togglePlay() {
   if (!state.currentTrack) return playSelected();
   if (!state.currentTrack.url) return showToast('Demo preview: choose your music folder to play local audio');
   if (audio.paused) {
-    audio.play().catch((error) => showToast(`Unable to play this file${error?.message ? `: ${error.message}` : ''}`, { playback: true }));
+    audio.play().catch((error) => showToast(`Unable to play this file${error?.message ? `: ${error.message}` : ''}`));
   } else {
     audio.pause();
   }
@@ -2801,7 +2792,7 @@ async function chooseLibrary() {
 
 function reconcilePlaybackAfterLibraryRefresh(previousTrack, previousQueue, previousPlaybackList, previousBaseList) {
   const byPath = tracksByPath;
-  const lookup = (track) => track.external ? track : byPath.get(String(track.path || '').replaceAll('\\', '/').toLowerCase());
+  const lookup = (track) => byPath.get(String(track.path || '').replaceAll('\\', '/').toLowerCase());
   const remap = (tracks) => tracks.map(lookup).filter(Boolean);
   state.queue = remap(previousQueue);
   state.playbackList = remap(previousPlaybackList);
@@ -3428,11 +3419,10 @@ function handlePlaybackError() {
   // Skipping past one bad file is helpful. Walking the entire library at one toast
   // every two seconds because a drive went away is not.
   if (state.consecutivePlaybackErrors >= 5) {
-    showToast('Playback stopped: several files in a row could not be read', { playback: true });
+    showToast('Playback stopped: several files in a row could not be read');
     return;
   }
-  showToast(`Playback error: ${track.title || 'track'} — ${detail}`, { playback: true });
-  if (track.external && state.playbackList.length <= 1 && !state.queue.length) return;
+  showToast(`Playback error: ${track.title || 'track'} — ${detail}`);
   const requestId = playbackRequestId;
   const timer = setTimeout(() => {
     if (playbackErrorTimer !== timer) return;
