@@ -26,5 +26,6 @@ Desktop.ini
 # Local Claude Code settings (shared project settings stay tracked)
 .claude/settings.local.json
 
-# Collected release artifacts (build-release.bat)
+# Collected release artifacts (build-release.bat / CI)
 release/
+installers/

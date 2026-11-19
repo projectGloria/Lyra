@@ -219,6 +219,22 @@ All shortcuts can be customized or cleared in **Options -> Shortcuts**. System-w
 
 > **Android companion app**: See [`android/README.md`](android/README.md) for JDK 21 / Android SDK 36 prerequisites and Gradle build commands.
 
+## How to release
+
+Releases are built automatically by [`.github/workflows/build-installers.yml`](.github/workflows/build-installers.yml) whenever a version tag matching `v*` is pushed (or when triggered manually via **Actions -> Build Installers -> Run workflow**).
+
+1. Update the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, commit your changes, then create and push a tag:
+
+   ```bash
+   git tag v1.0.0
+   git push --tags
+   ```
+
+2. Wait for the **Build Installers** workflow to finish.
+3. Download the built Windows installer (`Lyra-<version>-windows-x64.exe`):
+   - **Tag builds**: Attached directly to the new release on the repository's **[GitHub Releases](https://github.com/projectGloria/Lyra/releases)** page, and also available in the workflow run's **installers** artifact.
+   - **Manual (`workflow_dispatch`) builds**: Available under the workflow run's **Artifacts -> installers** download in GitHub Actions.
+
 ## Configuration and diagnostics
 
 <details>
