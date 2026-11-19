@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src/assets/logo.png" alt="Lyra logo" width="112" height="112" />
+<img src="docs/assets/lyra-icon.png" alt="Lyra logo" width="112" height="112" />
 
 # Lyra
 
