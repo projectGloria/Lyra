@@ -1,328 +1,245 @@
 <div align="center">
 
-<img src="newIcon.png" alt="Lyra Logo" width="128" height="128" />
+<img src="src/assets/logo.png" alt="Lyra logo" width="112" height="112" />
 
 # Lyra
 
-**A refined, local-first music player crafted for Windows**
-
-*Your library, your folders, your sound — powered by Tauri, Rust, and fluid web aesthetics.*
+Local-first desktop music player for Windows where every folder is a playlist.
 
 <p>
-  <a href="#-license--credits"><img src="https://img.shields.io/badge/License-ISC-00B074.svg?style=flat-square" alt="License: ISC" /></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4.svg?style=flat-square&logo=windows" alt="Platform: Windows x64" />
-  <img src="https://img.shields.io/badge/Tauri-1.6-24C8D5.svg?style=flat-square&logo=tauri" alt="Tauri" />
-  <img src="https://img.shields.io/badge/Rust-1.70+-DEA584.svg?style=flat-square&logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/Audio-Lofty%20Metadata-FFA000.svg?style=flat-square" alt="Lofty Audio Engine" />
-  <img src="https://img.shields.io/badge/Telemetry-Zero%20%2F%20100%25%20Offline-success.svg?style=flat-square" alt="Telemetry Disabled" />
+  <a href="https://github.com/projectGloria/Lyra/actions/workflows/ci.yml"><img src="https://github.com/projectGloria/Lyra/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/Version-1.0.0-c9a94a?style=flat-square" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20x64-0078D4?style=flat-square" alt="Platform: Windows x64" />
+  <img src="https://img.shields.io/badge/Tauri-1.6%20%E2%80%A2%20Rust%201.70%2B-24C8D5?style=flat-square" alt="Tauri 1.6 and Rust 1.70+" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-ISC-00B074?style=flat-square" alt="License: ISC" /></a>
 </p>
-
----
 
 <p>
-  <a href="#-about-lyra">About</a> •
-  <a href="#-key-features">Features</a> •
-  <a href="#-visual-tour">Visual Tour</a> •
-  <a href="#-supported-audio-formats">Supported Formats</a> •
-  <a href="#-keyboard-shortcuts">Shortcuts</a> •
-  <a href="#-installation--getting-started">Installation</a> •
-  <a href="#-building-from-source">Building</a> •
-  <a href="#-architecture--tech-stack">Architecture</a> •
-  <a href="#-icon--design-philosophy">Design</a> •
-  <a href="#-license--credits">License</a>
+  <a href="#about">About</a> &bull;
+  <a href="#features">Features</a> &bull;
+  <a href="#screenshots">Screenshots</a> &bull;
+  <a href="#how-it-works">How it works</a> &bull;
+  <a href="#installation">Installation</a> &bull;
+  <a href="#usage">Usage</a> &bull;
+  <a href="#building-from-source">Building</a> &bull;
+  <a href="#contributing">Contributing</a> &bull;
+  <a href="#license--credits">License</a>
 </p>
 
-<p align="center">
-  <img
-    src="src/assets/defaultArtwork.png"
-    alt="Lyra Artwork & Visual Preview"
-    width="480"
-    style="border-radius: 16px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);"
-  />
-</p>
+<img src="docs/assets/library-view.png" alt="Lyra main desktop window showing the sidebar playlists, track list, Now Playing panel, and playback dock in the Lyra Gold theme" width="880" />
 
 </div>
 
 ---
 
-## 🎵 About Lyra
+## About
 
-In an era of streaming lock-in, algorithmic feeds, forced subscriptions, and invasive background telemetry, **Lyra** returns control to where it belongs: your local file system and your personal audio collection.
+Lyra is an offline desktop music player for Windows built with Tauri, Rust, and a zero-framework web UI. Your music folder is the database: every subfolder containing audio files becomes a playlist, tracks placed directly in the library root appear under **Liked Songs**, and custom titles, descriptions, covers, and track ordering are stored in lightweight sidecar files next to your audio. There are no accounts, no cloud sync, and no telemetry.
 
-Named after the celestial constellation of the mythical lyre, **Lyra** is a standalone, local-first desktop music player built for Windows with **Tauri** and **Rust**. It marries the agility and visual elegance of a modern web interface with the raw speed, safety, and minimal memory footprint of native systems code:
+This repository also contains a separate, standalone offline Android app (Kotlin, Jetpack Compose, Media3, Room) in [`android/`](android/README.md).
 
-- 📂 **Folder-Is-The-Database**: No opaque database schemas to corrupt. Every subfolder containing audio files is automatically mapped as a playlist.
-- ❤️ **Root Folder as Liked Songs**: Audio tracks located directly at your library's root folder assemble into your personal collection of favorites without manual tagging.
-- ⚡ **Multi-Threaded Parallel Scanning**: Powered by Rust’s `rayon` and `lofty` metadata parser, Lyra indexes tens of thousands of tracks in seconds.
-- 🌊 **Living Canvas & Glass Aesthetics**: A custom canvas-driven organic ink simulation advects gently behind frosted glass panels, dynamically harmonizing with your tunes.
-- 🛡️ **100% Offline & Private**: Zero analytics, zero network tracking, and zero cloud accounts. What happens in your music folder stays on your machine.
-- 🔄 **Real-Time Filesystem Watcher**: Background notifications detect newly dropped albums, renames, and deletions instantly without requiring manual library rescans.
+## Features
 
----
+- **Folder-as-playlist library**: Organize playlists directly in Windows Explorer. Custom playlist metadata, manual track order, and liked references outside the root live in non-destructive sidecars (`.lyra-playlist.json` and `.lyra-liked.json`).
+- **Fast parallel scanning and live sync**: Multi-threaded directory scanning with `rayon`, tag and cover extraction with `lofty`, SHA-1-keyed disk caching, and real-time filesystem watching via `notify`.
+- **Standalone Explorer Mini Player**: Right-click any audio file in Windows Explorer and choose **Open with -> Lyra** to play it in a compact 440x240 window without importing the folder or disturbing your main library queue.
+- **Built-in metadata and cover editor**: Edit title, artist, album, album artist, year, track number, genre, comment, and embedded artwork directly inside audio files.
+- **Customizable appearance**: 7 built-in themes (**Lyra Gold**, **Aurora Glass**, **Midnight Black**, **Ember Red**, **Violet Night**, **Forest Neon**, **Rose Noir**), custom accent colors, custom background images with glass opacity/blur sliders, and an optional sound-reactive **Ink in water** canvas.
+- **Responsive playback and navigation**: Virtualized track lists, instant search across tracks/artists/albums/playlists, Up Next and History queue drawer with playlist export, fullscreen Now Playing mode, and optional minimize-to-tray background playback.
+- **In-app and global hotkeys**: Rebindable keyboard and mouse-button shortcuts inside Lyra, plus opt-in system-wide hotkeys (modifier chords, F-keys, and hardware media keys) that work while minimized to the tray.
 
-## ✨ Key Features
+## Screenshots
 
-### Open files from Windows Explorer
+<p align="center">
+  <img src="docs/assets/fullscreen-player.png" alt="Lyra fullscreen player displaying large album artwork, track title, artist, and playback controls" width="880" />
+  <br /><em>Fullscreen player: ambient artwork backdrop with focused transport controls and a floating vertical volume slider.</em>
+</p>
 
-Install the latest Lyra setup, then right-click an audio file and choose **Open with → Lyra**.
-To use double-click playback, select Lyra under **Choose another app** and choose **Always**
-(or select Lyra for that extension in Windows **Settings → Apps → Default apps**).
-Installing Lyra preserves your existing default-player choices.
+<p align="center">
+  <img src="docs/assets/options-appearance.png" alt="Lyra Options modal on the Appearance tab showing seven theme presets, accent swatches, background blur controls, and Ink in water toggle" width="880" />
+  <br /><em>Options -> Appearance: seven built-in themes, custom accent color picker, glass panel sliders, and Ink in water toggle.</em>
+</p>
 
-Explorer opens a standalone mini player with artwork, play/pause, seeking, and volume.
-The mini player has its own playback, separate from the library window. If the library
-is playing, it pauses. Its queue, position, and window are left exactly as they were, and
-closing the mini player does not resume it. Closing the mini player stops its file. If
-the library window was never opened (and close-to-tray is off), Lyra exits.
-Files can be anywhere on disk; opening them does not import their folders or change
-your library. Multiple command-line file arguments play in argument order.
-Mini player selections are not restored on the next launch.
+<p align="center">
+  <img src="docs/assets/tag-editor.png" alt="Lyra track metadata editor modal with cover artwork preview and editable tag fields" width="880" />
+  <br /><em>Track metadata editor: edit embedded tags and cover artwork without leaving the player.</em>
+</p>
 
-For development, launch `lyra.exe "C:\Music\Song.mp3"` to test file opening directly.
-File associations are registered by the NSIS installer, not by `tauri dev`.
-The custom template in `src-tauri/installer/installer.nsi` is based on Tauri CLI 1.6.3;
-keep it aligned with the bundled CLI when upgrading. Its uninstall section removes
-Lyra's audio-handler registrations without changing other players' associations.
+<p align="center">
+  <img src="docs/assets/mini-player.png" alt="Lyra standalone Mini Player window showing artwork, seek bar, volume control, and Open Library button" width="440" />
+  <br /><em>Explorer Mini Player: plays files opened from Windows Explorer independently from the main library window.</em>
+</p>
 
-<table>
-  <tr>
-    <td width="50%">
-      <h3>📂 Folder-as-Playlist Engine</h3>
-      <p>Organize music the natural way. Every folder is a playlist; drop audio in or rearrange folders in Windows Explorer and Lyra mirrors it instantly without vendor lock-in.</p>
-    </td>
-    <td width="50%">
-      <h3>⚡ Rayon-Powered Rust Core</h3>
-      <p>High-concurrency parallel directory scanning with SHA-1 content verification, multi-layer caching, and native <code>lofty</code> tag extraction for instantaneous launches.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <h3>🌊 Generative Ink Backdrop</h3>
-      <p>Experience music with a living visual environment. Fluid canvas-based organic ink diffusion flows beneath frosted glass panels, reacting subtly to sound and themes.</p>
-    </td>
-    <td width="50%">
-      <h3>🎛️ Cinematic Fullscreen Player</h3>
-      <p>Immerse yourself with full-window playback featuring vibrant ambient artwork glows, vignette backdrops, oversized track typography, and vertical gesture volume control.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <h3>🔄 Live Folder Synchronization</h3>
-      <p>Low-overhead native filesystem watching via the <code>notify</code> crate automatically catches added tracks, renames, and tag adjustments in real time.</p>
-    </td>
-    <td width="50%">
-      <h3>⌨️ System-Wide Global Hotkeys</h3>
-      <p>Control playback from games, IDEs, or full-screen apps with native Windows media keys and customizable in-app shortcut bindings.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <h3>🔍 Instant Fuzzy Search &amp; Virtualization</h3>
-      <p>Instant token-matching across tracks, artists, albums, and playlists. Virtualized track lists render 50,000+ songs smoothly at 60 FPS without DOM lag.</p>
-    </td>
-    <td width="50%">
-      <h3>🏷️ Non-Destructive Sidecars &amp; Tag Editor</h3>
-      <p>Per-folder overrides and custom artwork live safely in lightweight sidecar files (<code>.lyra-playlist.json</code>), preserving original audio files and tag integrity.</p>
-    </td>
-  </tr>
-</table>
-
----
-
-## 🖼️ Visual Tour
-
-### 1. Ambient Glassmorphism &amp; Generative Ink Canvas
-Frosted acrylic glass panels layer over a custom real-time 2D ink fluid simulation (`ink-background.js`). The fluid dynamics evolve naturally, creating an ever-changing celestial aesthetic that stays light on CPU and GPU resources.
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│  [Lyra Logo] Lyra   [<] [>] [⌂]   [ 🔍 What do you want to play? ]     │
-├───────────────────┬──────────────────────────────────┬─────────────────┤
-│ 📂 Your Library   │ 🎵 Currently Viewing             │ 💿 Now Playing  │
-│ ───────────────── │ ──────────────────────────────── │ ─────────────── │
-│ ❤️ Liked Songs    │ Track 01 • Starlight Serenade    │ [Album Artwork] │
-│ 📁 Synthwave 80s  │ Track 02 • Midnight Drive        │ Echoes in Orbit │
-│ 📁 Lo-Fi Beats    │ Track 03 • Neon Horizons         │ Lyra Orchestra  │
-│ 📁 Classical Flac │ Track 04 • Solar Flares          │ 02:45 ────○ 4:10│
-├───────────────────┴──────────────────────────────────┴─────────────────┤
-│ [⏮] [▶/⏸] [⏭]   Starlight Serenade — Lyra Orchestra   [🔀] [🔁] [🔊 80%] │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### 2. Immersive Fullscreen Now Playing
-Press `F` or `F11` to dive into the fullscreen player. Lyra samples colors from the playing track's artwork to paint a deep, ambient vignette backdrop, paired with clean typography and a floating vertical volume slider.
-
-### 3. Non-Destructive Sidecar Architecture
-Custom playlist names, track orders, and custom covers are stored directly inside the music folder:
-- `.lyra-playlist.json`: Stores custom titles, descriptions, and manual track sequencing.
-- `.lyra-cover.*`: High-resolution custom folder covers that don't overwrite embedded audio tags.
-- `.lyra-liked.json`: Tracks references for songs favorited outside the root folder.
-
----
-
-## 🎧 Supported Audio Formats
-
-Lyra is powered by native Rust decoding via the [Lofty](https://github.com/Serial-ATA/lofty-rs) metadata library:
-
-| Format | File Extension | Type | Metadata &amp; Cover Extraction |
-| :--- | :--- | :--- | :--- |
-| **FLAC** | `.flac` | Lossless | Vorbis Comments, Embedded Picture Blocks |
-| **MP3** | `.mp3` | Lossy | ID3v1, ID3v2.2, ID3v2.3, ID3v2.4 (APIC) |
-| **WAV** | `.wav` | Uncompressed | RIFF INFO chunks, ID3v2 |
-| **AAC / M4A** | `.m4a`, `.m4b`, `.aac` | Lossy / ALAC | MP4 / iTunes atoms (`covr`), ADTS |
-| **Ogg Vorbis** | `.ogg`, `.oga` | Lossy | Vorbis Comments, METADATA_BLOCK_PICTURE |
-| **Opus** | `.opus` | Lossy | Opus Tags, Embedded Artwork |
-| **Matroska / WebM**| `.webm`, `.mka` | Container | Matroska Tagging, Audio Tracks |
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-Lyra features full keyboard accessibility and customizable shortcuts:
-
-### In-App Shortcuts
-| Key | Action |
-| :--- | :--- |
-| <kbd>Space</kbd> | Toggle Play / Pause |
-| <kbd>Ctrl</kbd> + <kbd>→</kbd> | Next Track |
-| <kbd>Ctrl</kbd> + <kbd>←</kbd> | Previous Track (or restart track if &gt; 5s) |
-| <kbd>↑</kbd> / <kbd>↓</kbd> | Volume Up / Down (5% increments) |
-| <kbd>Ctrl</kbd> + <kbd>F</kbd> | Focus Global Search |
-| <kbd>F</kbd> or <kbd>F11</kbd> | Toggle Fullscreen Player |
-| <kbd>M</kbd> | Toggle Mute |
-| <kbd>S</kbd> | Toggle Shuffle mode |
-| <kbd>R</kbd> | Cycle Repeat mode (Off / All / One) |
-| <kbd>Esc</kbd> | Close modal / Exit fullscreen / Clear selection |
-
-### Global System Shortcuts
-When enabled in **Options &gt; Global shortcuts**, Lyra responds to your hardware media keys and custom chords system-wide, even when minimized to the notification tray.
-
----
-
-## 🚀 Installation &amp; Getting Started
-
-### Running the Windows Installer
-Download or build the Windows NSIS installer:
-```powershell
-LyraSetup.exe
-```
-
-Upon installation:
-- Lyra creates Start Menu and Desktop shortcuts featuring the custom high-contrast icon.
-- User preferences and disk caches are isolated in `%APPDATA%\com.lyra.sona`.
-- The system tray icon enables seamless background listening without cluttering your taskbar.
-
-### Quick Start Guide
-1. **Select your Music Directory**: On first launch, click **Select Folder** and choose the root folder containing your audio library.
-2. **Instant Scan**: Lyra automatically scans all subfolders in parallel, parsing audio tags and caching album covers.
-3. **Playlists from Folders**: Every subdirectory is immediately available as a playlist in the left sidebar.
-4. **Favorites**: Songs stored directly at your library's root appear automatically under **Liked Songs**.
-
----
-
-## 🛠️ Building from Source
-
-### Prerequisites
-
-Ensure you have the following installed on your Windows machine:
-- **Node.js** (v18+ recommended)
-- **Rust &amp; Cargo** (v1.70+; install via [rustup.rs](https://rustup.rs/))
-- **Visual Studio C++ Build Tools** (with *Desktop development with C++*)
-- **WebView2** (pre-installed on modern Windows 10/11)
-
-### Build Steps
-
-1. **Clone the repository:**
-   ```powershell
-   git clone https://github.com/projectGloria/Lyra.git
-   cd Lyra
-   ```
-
-2. **Install frontend dependencies:**
-   ```powershell
-   npm install
-   ```
-
-3. **Run in development mode:**
-   ```powershell
-   npm run dev
-   ```
-   This compiles the Rust backend and launches the Tauri window with live hot-reloading for the frontend.
-
-4. **Run the automated test suite:**
-   Lyra includes comprehensive regression and unit tests covering track ID hashing, queue logic, media session contracts, and canvas shaders:
-   ```powershell
-   npm test
-   ```
-
-5. **Package the production installer:**
-   ```powershell
-   npm run build
-   ```
-   The production-optimized release executable and NSIS installer will be generated in:
-   ```
-   src-tauri/target/release/bundle/nsis/Lyra_1.0.0_x64-setup.exe
-   ```
-
----
-
-## 🏗️ Architecture &amp; Tech Stack
-
-Lyra is engineered around a clean separation between high-performance native systems code and a zero-latency, reactive user interface:
+## How it works
 
 ```mermaid
 flowchart TD
-    subgraph RustCore["Rust Core (Tauri Backend)"]
-        Scanner["Parallel Scanner (Rayon)"]
-        LoftyEngine["Metadata Parser (Lofty)"]
-        Watcher["Live Watcher (Notify)"]
-        Cache["Disk & Journal Cache (SHA-1)"]
-        TrashBin["Safe Deletion (Trash)"]
-        Tray["System Tray & Shortcuts"]
+    subgraph Rust["Rust Backend (src-tauri/src)"]
+        Scan["scan.rs (rayon + lofty)"]
+        Cache["cache.rs (SHA-1 disk cache)"]
+        Watch["watcher.rs (notify)"]
+        Sidecars["playlist.rs & liked.rs"]
+        OpenFiles["open_files.rs (single-instance)"]
+        Tray["main.rs & global_shortcuts.rs"]
     end
 
-    subgraph Bridge["IPC Protocol Bridge"]
-        TauriIPC["window.__TAURI__.invoke"]
-        AssetProto["asset:// Protocol Handler"]
+    subgraph Bridge["Tauri IPC Bridge (src/tauri-bridge.js)"]
+        Invoke["invoke() commands & events"]
+        Asset["asset:// protocol URLs"]
     end
 
-    subgraph Frontend["Modern Web Shell"]
-        State["Single Source State Store"]
-        VirtualList["Virtualized Track Engine (60 FPS)"]
-        InkEngine["Living Ink Canvas (2D Advection)"]
-        Audio["HTML5 Audio Element & Web Audio API"]
-        GlassCSS["Glassmorphism UI & Accent Themes"]
+    subgraph UI["Frontend Webviews (src/)"]
+        Main["index.html + renderer.js (library & player)"]
+        Ink["ink-background.js (2D canvas)"]
+        Mini["compact.html + compact.js (mini player)"]
     end
 
-    RustCore <--> Bridge
-    Bridge <--> Frontend
+    Rust <--> Bridge
+    Bridge <--> Main
+    Bridge <--> Mini
+    Main --- Ink
 ```
 
-- **Backend**: Built with **Tauri 1.6** and **Rust**. Handles file I/O, parallel directory walks, metadata parsing, file watching, and native window chrome.
-- **Frontend**: Lightweight vanilla ES2022 and modern CSS. Zero heavy frontend frameworks means minimal memory overhead, instant paint times, and rapid startup.
-- **Audio Output**: Clean asset protocol streaming with Web Audio API analysis for the fluid ink visualizer.
+The Rust core handles all filesystem I/O, parallel tag reading/writing, artwork caching, file watching, and OS integration (system tray, global shortcuts, recycle-bin deletion via `trash`, and single-instance Explorer launches). Every file path crossing to the frontend is converted to a scoped `asset://` URL inside [`src/tauri-bridge.js`](src/tauri-bridge.js), keeping the main library window (`src/index.html`) and standalone mini player (`src/compact.html`) isolated from direct filesystem access.
 
----
+## Supported audio formats
 
-## 🎨 Icon &amp; Design Philosophy
+Format discovery and metadata parsing are defined in [`src-tauri/src/util.rs`](src-tauri/src/util.rs) and powered by [`lofty`](https://github.com/Serial-ATA/lofty-rs):
 
-<p align="center">
-  <img src="newIcon.png" alt="Lyra Icon Close-up" width="120" height="120" />
-</p>
+| Format | Extensions |
+| :--- | :--- |
+| FLAC | `.flac` |
+| MP3 | `.mp3` |
+| WAV | `.wav` |
+| AAC / MP4 Audio | `.m4a`, `.m4b`, `.aac` |
+| Ogg Vorbis | `.ogg`, `.oga` |
+| Opus | `.opus` |
+| Matroska / WebM Audio | `.webm`, `.mka` |
 
-> *"Like the ancient Lyra constellation glowing in the night sky, music should bring clarity, resonance, and harmony without distractions."*
+## Installation
 
-The visual identity of Lyra reflects its core architectural tenets:
-- **Celestial Serenity**: Deep cosmic midnight tones paired with luminous accents to reduce visual fatigue during late-night listening.
-- **Organic Motion**: Living fluid canvas simulations represent the continuous, flowing nature of sound.
-- **High Legibility**: A sharp, refined icon silhouette engineered for clear identification across Windows taskbar, system tray, and high-DPI desktop displays.
+### Requirements
 
----
+- **OS**: Windows 10 or Windows 11 (x64)
+- **Runtime**: Microsoft Edge WebView2 (pre-installed on modern Windows 10/11)
 
-## 📄 License &amp; Credits
+### Install or run portable
 
-Lyra is open-source software distributed under the **[ISC License](package.json)**.
+Download from [GitHub Releases](https://github.com/projectGloria/Lyra/releases/latest) or build the release artifacts locally (see [Building from source](#building-from-source)):
 
-- **Author**: Lyra Contributors &amp; [projectGloria](https://github.com/projectGloria)
-- **Built With**: [Tauri](https://tauri.app/), [Rust](https://www.rust-lang.org/), and [Lofty](https://github.com/Serial-ATA/lofty-rs)
-- **Ecosystem**: Part of the projectGloria repository collection alongside [Kintsugi](https://github.com/projectGloria/Kintsugi).
+- **Installer (`Lyra_1.0.0_x64-setup.exe`)**: Installs for the current user, registers Lyra as an available audio handler without overriding your existing default player, and adds Start Menu/Desktop shortcuts.
+- **Portable (`Lyra_1.0.0_x64-portable.exe`)**: Self-contained executable with embedded frontend assets. Settings and caches are still stored in `%APPDATA%\com.lyra.sona`.
+
+### First run
+
+1. Launch Lyra and click **Choose folder** (or open **Options -> General -> Music folder**).
+2. Select the root directory of your music library.
+3. Wait a few seconds for the initial parallel scan. Subfolders appear as playlists in the left sidebar, and audio files directly in the root folder appear under **Liked Songs**.
+
+## Usage
+
+### Playing files from Windows Explorer
+
+Right-click any supported audio file and choose **Open with -> Lyra** (or set Lyra as the default app in Windows **Settings -> Apps -> Default apps**).
+
+- Explorer launches the standalone **Mini Player** with its own playback, seek bar, and volume.
+- If the main library window is currently playing, it pauses and preserves its queue and position. Closing the Mini Player stops its file without resuming the library.
+- Opening files from Explorer never imports their folders into your library.
+- From a terminal, you can also pass one or more file paths directly:
+
+```powershell
+.\Lyra.exe "C:\Music\Track 01.flac" "C:\Music\Track 02.flac"
+```
+
+### Default keyboard and mouse shortcuts
+
+All shortcuts can be customized or cleared in **Options -> Shortcuts**. System-wide hotkeys are unbound by default and can be configured in **Options -> Global shortcuts**.
+
+| Default binding | Action |
+| :--- | :--- |
+| `Space` | Play / pause |
+| `Ctrl` + `Right` | Next track |
+| `Ctrl` + `Left` | Previous track |
+| `Right` / `Left` | Seek forward / back 5s |
+| `Up` / `Down` | Volume up / down |
+| `F` | Toggle fullscreen player |
+| `Mouse back` / `Mouse forward` | Navigate back / forward |
+
+*(Mute, Like current song, Shuffle, and Repeat mode are available to bind in **Options -> Shortcuts**.)*
+
+## Building from source
+
+### Prerequisites
+
+- **Node.js** (v18+ recommended; tested with Node 26)
+- **Rust and Cargo** (v1.70+, per `src-tauri/Cargo.toml`) via [rustup.rs](https://rustup.rs/)
+- **Visual Studio C++ Build Tools** (*Desktop development with C++* workload)
+- **WebView2** (pre-installed on Windows 10/11)
+
+### Steps
+
+1. Clone the repository and install dependencies:
+
+   ```powershell
+   git clone https://github.com/projectGloria/Lyra.git
+   cd Lyra
+   npm install
+   ```
+
+2. Run in development mode:
+
+   ```powershell
+   npm run dev
+   ```
+
+3. Run the test suites:
+
+   ```powershell
+   npm test
+   cargo test --manifest-path src-tauri/Cargo.toml
+   ```
+
+4. Build the production Windows installer:
+
+   ```powershell
+   npm run build
+   ```
+
+   Output installer: `src-tauri/target/release/bundle/nsis/Lyra_1.0.0_x64-setup.exe`.
+
+   To produce both the NSIS installer and a standalone portable executable in `release/`, run [`build-release.bat`](build-release.bat):
+
+   ```powershell
+   .\build-release.bat
+   ```
+
+   Outputs:
+   - `release\Lyra_1.0.0_x64-setup.exe`
+   - `release\Lyra_1.0.0_x64-portable.exe`
+
+> **Android companion app**: See [`android/README.md`](android/README.md) for JDK 21 / Android SDK 36 prerequisites and Gradle build commands.
+
+## Configuration and diagnostics
+
+<details>
+<summary>Sidecar files, app data paths, and installer notes</summary>
+
+- **App data directory**: `%APPDATA%\com.lyra.sona` stores `settings.json`, the library cache, and rotating diagnostic logs (with home and library paths masked; open via **Options -> Advanced -> Diagnostic reports**).
+- **Folder sidecars**:
+  - `.lyra-playlist.json` inside a playlist folder stores custom title, description, cover filename, and manual track order.
+  - `.lyra-liked.json` at the library root stores references to tracks liked from subfolders.
+- **NSIS installer template**: [`src-tauri/installer/installer.nsi`](src-tauri/installer/installer.nsi) registers audio file handlers for Windows Explorer and removes only Lyra's registrations on uninstall. It is based on `@tauri-apps/cli` 1.6.3; keep it aligned when upgrading Tauri CLI.
+
+</details>
+
+## Contributing
+
+Contributions and bug reports are welcome. Before opening a pull request:
+
+1. Run frontend regression tests (`npm test`) and Rust tests (`cargo test --manifest-path src-tauri/Cargo.toml`).
+2. Keep changes focused and preserve Lyra's offline, zero-telemetry design.
+
+## License & credits
+
+- **License**: Distributed under the **[ISC License](LICENSE)** (also declared in [`package.json`](package.json) and [`src-tauri/Cargo.toml`](src-tauri/Cargo.toml)). The NSIS installer template in [`src-tauri/installer/`](src-tauri/installer/LICENSE-MIT) is derived from Tauri's MIT-licensed template.
+- **Built with**: [Tauri](https://tauri.app/), [Rust](https://www.rust-lang.org/), [Lofty](https://github.com/Serial-ATA/lofty-rs), [Rayon](https://github.com/rayon-rs/rayon), and [Notify](https://github.com/notify-rs/notify).
