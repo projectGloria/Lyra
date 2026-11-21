@@ -1,0 +1,10 @@
+id            = "Lyra"
+name          = "Lyra"
+version       = "1.0.0"
+main_exe      = "lyra.exe"
+icon          = "Lyra.ico"
+accent        = "#ec4899"
+description   = "Local-first hi-fi music player"
+needs_webview2 = true
+data_folders  = ["%APPDATA%\\com.lyra.sona"]
+legacy_names  = ["Lyra"]

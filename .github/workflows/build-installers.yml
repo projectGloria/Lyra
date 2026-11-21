@@ -1,4 +1,4 @@
-name: Build Installers
+name: Release
 
 on:
   push:
@@ -7,22 +7,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
-    name: Build Windows x64 Installer
+  release:
+    name: Build and pack Windows x64 setup
     runs-on: windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,66 +26,41 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install npm dependencies
-        run: npm ci
+      # The frontend in src/ is embedded into the exe by the custom-protocol build.
+      - name: Build Lyra (release)
+        run: cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml
 
-      - name: Resolve release version
+      - name: Stage runtime files
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}".TrimStart("v")
-          } else {
-            $version = (node -p "require('./src-tauri/tauri.conf.json').package.version").Trim()
-          }
-          if (-not $version) {
-            Write-Error "Could not determine release version."
-            exit 1
-          }
-          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Resolved version: $version"
+          New-Item -ItemType Directory -Force -Path app-dist | Out-Null
+          Copy-Item src-tauri/target/release/lyra.exe app-dist/lyra.exe
+          Get-ChildItem app-dist
 
-      - name: Build NSIS installer
-        run: npm run build
-
-      - name: Collect installers
+      - name: Download WebView2 bootstrapper
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path installers | Out-Null
-          $installer = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if (-not $installer) {
-            Write-Error "No NSIS installer (*-setup.exe) found in src-tauri/target/release/bundle/nsis."
-            exit 1
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile MicrosoftEdgeWebview2Setup.exe
+
+      - name: Make sure the release exists
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "could not create release $env:TAG" }
           }
-          $dest = "installers/Lyra-$env:VERSION-windows-x64.exe"
-          Copy-Item -Path $installer.FullName -Destination $dest -Force
-          Get-ChildItem -Path installers
+          $global:LASTEXITCODE = 0
 
-      - name: Upload installers artifact
-        uses: actions/upload-artifact@v4
+      - name: Pack and attach the setup
+        uses: projectGloria/GloriaSetup@v0.1.0
         with:
-          name: installers
-          path: installers/
-          if-no-files-found: error
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download installers artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: installers
-          path: installers
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: installers/*
-          generate_release_notes: true
+          app-dir: app-dist
+          manifest: gloria.toml
+          webview2-bootstrapper: MicrosoftEdgeWebview2Setup.exe
+          certificate: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          certificate-password: ${{ secrets.WINDOWS_PFX_PASSWORD }}
