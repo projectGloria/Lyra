@@ -1,6 +1,6 @@
 id            = "Lyra"
 name          = "Lyra"
-version       = "1.0.0"
+version       = "1.0.1"
 main_exe      = "lyra.exe"
 icon          = "Lyra.ico"
 accent        = "#ec4899"
