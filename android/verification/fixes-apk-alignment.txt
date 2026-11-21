@@ -1,1 +1,0 @@
-APK zip alignment check passed (-c -P 16 4).
