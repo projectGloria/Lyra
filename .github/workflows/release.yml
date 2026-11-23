@@ -125,7 +125,7 @@ jobs:
       - name: Pack installer with GloriaSetup
         shell: pwsh
         run: |
-          npx --yes gloria-setup@0.2.2 --app app-dist --manifest gloria.toml --version ${{ needs.version.outputs.version }} --webview2-bootstrapper MicrosoftEdgeWebview2Setup.exe --out dist
+          npx --yes gloria-setup@0.2.4 --app app-dist --manifest gloria.toml --version ${{ needs.version.outputs.version }} --webview2-bootstrapper MicrosoftEdgeWebview2Setup.exe --out dist
 
       - name: Verify installer dry-run
         shell: pwsh

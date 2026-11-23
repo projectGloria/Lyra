@@ -1,6 +1,6 @@
 [package]
 name = "lyra"
-version = "1.0.2"
+version = "1.0.3"
 description = "Lyra music player"
 authors = ["Lyra"]
 license = "ISC"
