@@ -170,6 +170,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
@@ -183,6 +184,7 @@ jobs:
           gh release create "$TAG" \
             "release-assets/${ASSET}" \
             "release-assets/SHA256SUMS.txt" \
+            --target "${{ github.sha }}" \
             --draft \
             --title "Lyra ${TAG}" \
             --generate-notes \
