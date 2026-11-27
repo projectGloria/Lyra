@@ -1,5 +1,5 @@
 @echo off
-:: Lyra release builder - double-click to produce the NSIS installer + a portable exe.
+:: Lyra release builder - double-click to produce the GloriaSetup installer + a portable exe.
 :: Output lands in .\release\ and Explorer opens on it when done.
 setlocal EnableExtensions EnableDelayedExpansion
 
@@ -9,7 +9,7 @@ cd /d "%~dp0"
 set "ROOT=%~dp0"
 :: Not named TARGET: cargo/tauri-codegen read the TARGET env var as the Rust target triple.
 set "REL_DIR=%ROOT%src-tauri\target\release"
-set "NSIS_DIR=%REL_DIR%\bundle\nsis"
+set "STAGE=%ROOT%release\stage"
 set "OUT=%ROOT%release"
 
 echo.
@@ -46,22 +46,22 @@ echo.
 echo [3/3] Collecting artifacts into .\release ...
 if not exist "%OUT%" mkdir "%OUT%"
 
-:: Pick the newest *-setup.exe; old versions can linger in bundle\nsis between builds.
-set "SETUP_SRC="
-for /f "delims=" %%F in ('dir /b /o-d "%NSIS_DIR%\*-setup.exe" 2^>nul') do (
-    if not defined SETUP_SRC set "SETUP_SRC=%NSIS_DIR%\%%F"
-)
-if not defined SETUP_SRC (echo [ERROR] No installer found in "%NSIS_DIR%". & goto :fail)
+:: GloriaSetup is the installer (the same one the release workflow packs); Tauri's NSIS bundle is off.
+if not exist "%REL_DIR%\lyra.exe" (echo [ERROR] "%REL_DIR%\lyra.exe" not found. & goto :fail)
+if exist "%STAGE%" rmdir /s /q "%STAGE%"
+mkdir "%STAGE%" || goto :fail
+copy /y "%REL_DIR%\lyra.exe" "%STAGE%\lyra.exe" >nul || goto :fail
+call npx --yes gloria-setup@latest --app "%STAGE%" --manifest gloria.toml --version %VERSION% --out "%OUT%"
+if errorlevel 1 (echo. & echo [ERROR] gloria-setup pack failed. & goto :fail)
+rmdir /s /q "%STAGE%"
 
 set "SETUP_OUT=%OUT%\Lyra_%VERSION%_x64-setup.exe"
 set "PORTABLE_OUT=%OUT%\Lyra_%VERSION%_x64-portable.exe"
-
-copy /y "!SETUP_SRC!" "%SETUP_OUT%" >nul || goto :fail
+if not exist "%SETUP_OUT%" (echo [ERROR] "%SETUP_OUT%" was not created. & goto :fail)
 
 :: Tauri v1 has no portable target; the raw release binary IS the portable build
 :: (frontend assets are embedded, WebView2 ships with Win10/11).
-if not exist "%REL_DIR%\Lyra.exe" (echo [ERROR] "%REL_DIR%\Lyra.exe" not found. & goto :fail)
-copy /y "%REL_DIR%\Lyra.exe" "%PORTABLE_OUT%" >nul || goto :fail
+copy /y "%REL_DIR%\lyra.exe" "%PORTABLE_OUT%" >nul || goto :fail
 
 echo.
 echo ===============================================
